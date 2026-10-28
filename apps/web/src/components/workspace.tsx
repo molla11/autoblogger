@@ -38,6 +38,7 @@ import {
   money,
   watchEvents,
   errorMessage,
+  ApiError,
 } from "@/lib/api";
 import type {
   User,
@@ -123,6 +124,8 @@ export default function Workspace() {
     }
   }, [notify]);
   useEffect(() => {
+    let mounted = true;
+    const initialization = new AbortController();
     async function init() {
       const params = new URLSearchParams(location.search);
       if (location.pathname === "/connect" || params.has("challenge")) {
@@ -150,17 +153,36 @@ export default function Workspace() {
           notify(errorMessage(e), true);
         }
       }
-      if (getToken()) {
+      const initialToken = getToken();
+      if (initialToken) {
         try {
-          setUser(await api<User>("/me"));
-        } catch {
-          setToken("");
+          const current = await api<User>("/me", {
+            signal: initialization.signal,
+          });
+          if (mounted) setUser(current);
+        } catch (error) {
+          if (!mounted) return;
+          if (
+            error instanceof ApiError &&
+            error.status === 401 &&
+            getToken() === initialToken
+          )
+            setToken("");
+          else
+            notify(
+              "연결을 확인한 뒤 새로고침해 주세요. 로그인 정보는 보존했습니다.",
+              true,
+            );
         }
       }
-      setReady(true);
+      if (mounted) setReady(true);
     }
     void init();
-    return () => streams.current.forEach((controller) => controller.abort());
+    return () => {
+      mounted = false;
+      initialization.abort();
+      streams.current.forEach((controller) => controller.abort());
+    };
   }, [notify]);
   useEffect(() => {
     if (user) void refresh();

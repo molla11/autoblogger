@@ -1,5 +1,33 @@
 import { test, expect } from "@playwright/test";
 const API = "http://127.0.0.1:4000/api";
+test("temporary API failure preserves a valid login for reconnection", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post(API + "/auth/local", {
+    data: { email: "network-reconnect@local.test" },
+  });
+  const { token } = await response.json();
+  await page.addInitScript(
+    (value) => localStorage.setItem("autoblogger.session", value),
+    token,
+  );
+  await page.route(API + "/me", (route) => route.abort("failed"));
+  await page.goto("/");
+  await expect(
+    page.getByText(
+      "연결을 확인한 뒤 새로고침해 주세요. 로그인 정보는 보존했습니다.",
+    ),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("autoblogger.session")),
+  ).toBe(token);
+  await page.unroute(API + "/me");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: /오늘의 풀이가/ }),
+  ).toBeVisible();
+});
 test("local onboarding, source timeline, admin settings and responsive workspace", async ({
   page,
 }) => {
