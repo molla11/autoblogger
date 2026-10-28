@@ -1,6 +1,9 @@
 packages:
   - apps/*
   - packages/*
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
+allowBuilds:
+  esbuild: true
+  sharp: true
+  '@vscode/vsce-sign': true
+  keytar: false
+  msgpackr-extract: false
