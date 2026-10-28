@@ -2,3 +2,12 @@
 .env
 .env.*
 !.env.example
+node_modules/
+dist/
+.next/
+.data/
+coverage/
+test-results/
+playwright-report/
+*.vsix
+*.log

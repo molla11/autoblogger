@@ -1,0 +1,1 @@
+{"name":"@autoblogger/ai","version":"0.1.0","private":true,"main":"src/index.ts","types":"src/index.ts","scripts":{"typecheck":"tsc --noEmit","build":"tsc"},"dependencies":{"@autoblogger/shared":"workspace:*","zod":"^3.25.76","undici":"^7.16.0"}}
