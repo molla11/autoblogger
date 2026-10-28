@@ -15,6 +15,11 @@ jobs:
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      - name: Build deployment containers
+        run: |
+          docker build --target api --tag autoblogger-api:ci .
+          docker build --target worker --tag autoblogger-worker:ci .
+          docker build --target web --tag autoblogger-web:ci .
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
