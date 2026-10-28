@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Journal, atomicJson } from './journal';
-import { eligiblePath, globMatches, hash, MAX_FILE_BYTES, readSafeText, redact, withinRoot } from './safety';
+import { BoundedOutput, eligiblePath, globMatches, hash, MAX_FILE_BYTES, readSafeText, redact, withinRoot } from './safety';
 import { parseCommand, ParsedCommand, runStatus } from './parser';
 import { RecordEvent } from './types';
 
@@ -36,7 +36,7 @@ export class Recorder {
   constructor(readonly journal: Journal) {
     for (const event of journal.all()) {
       if (event.type === 'snapshot' && event.filePath) this.snapshots.set(event.filePath + ':' + event.data.hash,event.id);
-      if (event.type === 'run' && event.data.status === 'success' && ['compile','compile_run'].includes(String(event.data.kind)) && event.data.executable && event.data.snapshotId && event.filePath) {
+      if (event.type === 'run' && ((event.data.kind === 'compile' && event.data.status === 'success') || (event.data.kind === 'compile_run' && ['success','runtime_error'].includes(String(event.data.status)))) && event.data.executable && event.data.snapshotId && event.filePath) {
         this.builds.set(String(event.data.cwd) + ':' + event.data.executable,{snapshotId:String(event.data.snapshotId),filePath:event.filePath});
       }
     }
@@ -125,7 +125,12 @@ export class Recorder {
       if (!this.journal.manifest.recording || !this.eligible(file) || Buffer.byteLength(after) > MAX_FILE_BYTES || Buffer.byteLength(before) > MAX_FILE_BYTES || after.includes('\0')) return;
       before = redact(before); after = redact(after);
       if (before === after) return;
-      await this.journal.append({type:'edit',occurredAt,documentVersion:version,...this.fileFields(file),data:{before,after,diff:textDiff(before,after),source:unknown ? 'unknown' : 'direct'}});
+      let data: Record<string,unknown> = {before,after,diff:textDiff(before,after),source:unknown ? 'unknown' : 'direct'};
+      if (Buffer.byteLength(JSON.stringify(data)) > MAX_FILE_BYTES) {
+        const diff = new BoundedOutput(); diff.append(String(data.diff));
+        data = {diff:diff.value(),source:'unknown',truncated:true,beforeHash:hash(before),afterHash:hash(after),reason:'Large edit; full saved content remains in snapshots'};
+      }
+      await this.journal.append({type:'edit',occurredAt,documentVersion:version,...this.fileFields(file),data});
       await this.activity(occurredAt);
     });
   }
@@ -172,9 +177,9 @@ export class Recorder {
     return this.serially(async () => {
       const endedAt = new Date().toISOString();
       const result = runStatus(context.parsed.kind,exitCode,output);
-      // A combined command has no independent compiler exit result. Retain the build only if compiler success is established.
+      // A combined && command classified as a runtime error still produced the executable.
       if (context.parsed.executable && context.snapshotId && context.filePath &&
-        ((context.parsed.kind === 'compile' && exitCode === 0) || (context.parsed.kind === 'compile_run' && result.status === 'success'))) {
+        ((context.parsed.kind === 'compile' && exitCode === 0) || (context.parsed.kind === 'compile_run' && ['success','runtime_error'].includes(result.status)))) {
         this.builds.set(context.cwd + ':' + context.parsed.executable,{snapshotId:context.snapshotId,filePath:this.fileFields(context.filePath).filePath});
       }
       await this.journal.append({type:'run',occurredAt:context.startedAt,...(context.filePath ? this.fileFields(context.filePath) : {}),data:{

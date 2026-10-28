@@ -11,3 +11,4 @@ test-results/
 playwright-report/
 *.vsix
 *.log
+*.tsbuildinfo

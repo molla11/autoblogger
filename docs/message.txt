@@ -8,9 +8,10 @@ Autoblogger 개발 결과 및 이어서 할 일
 - Ghost CMS: https://cms.shinem.dev. 기존 webhook → https://shinem.dev 배포를 유지합니다.
 
 개발 중 확인된 제약
-- Docker 소켓 접근 불가. 로컬은 PostgreSQL 엔진 PGlite와 별도 실행 가능한 큐 환경으로 구성합니다.
+- Docker 소켓 접근 불가. 기본 PGlite 외에도 독립된 실제 PostgreSQL16.15와 Redis7을 사용자 권한으로 실행했습니다.
 - Ghost 기본 노드의 Lexical 0.13.1과 최신 BlockIdExtension은 호환되지 않습니다. 명세의 전환 조건에 따라 Tiptap + Ghost HTML 카드 경로를 사용합니다.
-- Ghost Admin API 첫 조회 HTTP 403. 원인을 조사 중이며 인증 성공으로 보고하지 않습니다.
+- Ghost Admin API: User-Agent를 명시해 조회 인증 성공. 서버 Ghost6.67. 운영 사이트 글은 변경하지 않았습니다.
+- OpenRouter: Azure 지역 endpoint azure/eu로 지정한 모델 호출 성공. 상위 Azure 이름만으로는 라우팅이 거절되어 정확한 endpoint를 사용합니다.
 - 실제 사람의 10개 세션, 베타 참여 동의, 독립 평가자 채점은 자동 생성하지 않습니다. 이식/mock 테스트와 정식 평가를 구분합니다.
 
 완료 시 이 파일에 검증 결과, 보류 사유와 배포 절차를 갱신합니다.

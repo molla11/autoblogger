@@ -94,6 +94,6 @@ export function runStatus(kind: ParsedCommand['kind'], exitCode: number | undefi
   if (exitCode === undefined) return {status:'unknown'};
   if (exitCode === 0) return {status:'success'};
   if (kind === 'compile' || (kind === 'python' && /(?:SyntaxError|IndentationError|TabError):/.test(output)) ||
-    (kind === 'compile_run' && /:\d+(?::\d+)?:\s*(?:fatal\s+)?error:/i.test(output))) return {status:'compile_error'};
+    (kind === 'compile_run' && /:\d+(?::\d+)?:\s*(?:fatal\s+)?error:|undefined reference to|(?:collect2|ld|clang\+\+|g\+\+):\s*(?:fatal\s+)?error:/i.test(output))) return {status:'compile_error'};
   return {status:'runtime_error', ...(exitCode > 128 ? {signal:exitCode - 128} : {})};
 }

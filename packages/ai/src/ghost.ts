@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, FormData as UndiciFormData, fetch as undiciFetch } from 'undici';
 import sanitizeHtml from 'sanitize-html';
 
 export class GhostError extends Error {constructor(message:string,public code='GHOST_ERROR',public remote?:unknown){super(message);}}
@@ -36,7 +36,7 @@ export async function safeFetch(raw:string,init:Parameters<typeof undiciFetch>[1
     if(declared>limit)throw new GhostError('원격 응답이 너무 큽니다.');
     const chunks:Uint8Array[]=[];let size=0;
     if(response.body)for await(const chunk of response.body){size+=chunk.length;if(size>limit)throw new GhostError('원격 응답이 너무 큽니다.');chunks.push(chunk);}
-    return new Response(Buffer.concat(chunks),{status:response.status,statusText:response.statusText,headers:Object.fromEntries(response.headers)});
+    return new Response([204,205,304].includes(response.status)?null:Buffer.concat(chunks),{status:response.status,statusText:response.statusText,headers:Object.fromEntries(response.headers)});
   }finally{await dispatcher.close();}
 }
 export function cleanGhostLexical(lexical:any):any{
@@ -56,6 +56,26 @@ export function cleanGhostLexical(lexical:any):any{
   return {root};
 }
 export type GhostPost={id:string;title:string;status:string;updated_at:string;url:string;lexical:string;slug:string};
+/** Parse image attributes, upload each unique source once, then serialize safely. */
+export async function rewriteGhostImages(lexical:any,upload:(url:string)=>Promise<string>){
+  const document=structuredClone(lexical),sources=new Set<string>();
+  const walk=(node:any,visit:(node:any)=>void)=>{if(!node||typeof node!=='object')return;visit(node);if(Array.isArray(node.children))node.children.forEach((child:any)=>walk(child,visit));};
+  const htmlOptions={allowedTags:[...sanitizeHtml.defaults.allowedTags,'img','figure','figcaption','h1','h2','h3','pre','code'],allowedAttributes:{...sanitizeHtml.defaults.allowedAttributes,img:['src','alt','width','height'],code:['class'],pre:['class']},allowedSchemes:['https','http','mailto'],allowProtocolRelative:false};
+  walk(document?.root,node=>{
+    if(node.type==='image'&&typeof node.src==='string')sources.add(node.src);
+    if(node.type==='html'){
+      node.html=sanitizeHtml(String(node.html??''),htmlOptions);
+      sanitizeHtml(node.html,{...htmlOptions,transformTags:{img:(tagName,attribs)=>{if(attribs.src)sources.add(attribs.src);return {tagName,attribs};}}});
+    }
+  });
+  const mapped=new Map<string,string>();
+  for(const src of sources){const url=await upload(src);if(!/^https?:\/\//.test(url))throw new GhostError('Ghost 이미지 업로드 URL이 유효하지 않습니다.');mapped.set(src,url);}
+  walk(document?.root,node=>{
+    if(node.type==='image'&&mapped.has(node.src))node.src=mapped.get(node.src);
+    if(node.type==='html')node.html=sanitizeHtml(node.html,{...htmlOptions,transformTags:{img:(tagName,attribs)=>({tagName,attribs:{...attribs,...(mapped.has(attribs.src)?{src:mapped.get(attribs.src)!}:{})}})}});
+  });
+  return cleanGhostLexical(document);
+}
 export class GhostClient {
   private url:string;
   constructor(private options:{url:string;key:string;allowLocal?:boolean}){this.url=options.url.replace(/\/$/,'');}
@@ -68,8 +88,8 @@ export class GhostClient {
   }
   private async request(path:string,method='GET',body?:unknown){
     const headers:Record<string,string>={Authorization:`Ghost ${this.token()}`,'Accept-Version':'v5.0','User-Agent':'autoblogger/0.1'};
-    let payload:BodyInit|undefined;
-    if(body instanceof FormData)payload=body;else if(body!==undefined){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
+    let payload:string|UndiciFormData|undefined;
+    if(body instanceof UndiciFormData)payload=body;else if(body!==undefined){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
     const response=await safeFetch(this.url+'/ghost/api/admin/'+path,{method,headers,body:payload as any},this.options.allowLocal);
     if(response.status===204)return {};
     const data=await response.json().catch(()=>({})) as any;
@@ -83,7 +103,7 @@ export class GhostClient {
   async uploadImage(data:Uint8Array,filename:string,mime:string):Promise<string>{
     if(data.byteLength>10*1024*1024)throw new GhostError('이미지는 10MB 이하여야 합니다.');
     if(!['image/png','image/jpeg','image/gif','image/webp'].includes(mime))throw new GhostError('지원하지 않는 이미지 형식입니다.');
-    const form=new FormData();form.append('file',new Blob([new Uint8Array(data)],{type:mime}),filename.replace(/[^a-zA-Z0-9._-]/g,'_'));form.append('purpose','image');
+    const form=new UndiciFormData();form.append('file',new Blob([new Uint8Array(data)],{type:mime}),filename.replace(/[^a-zA-Z0-9._-]/g,'_'));form.append('purpose','image');
     const result=await this.request('images/upload/','POST',form);return result.images[0].url;
   }
   async publish(input:{articleId:string;title:string;lexical:any;status:'draft'|'published';remoteId?:string;expectedUpdatedAt?:string}):Promise<GhostPost>{

@@ -18,11 +18,19 @@
 
 ## 현재 사실
 - GitHub push 정상. 초기 문서 커밋 e6451fc, f7f4c38.
-- Docker 소켓 권한 불가. Docker 없이 PGlite(실제 PostgreSQL 엔진) 로컬 모드 및 Redis 별도 실행 경로로 검증 예정.
+- Docker 소켓 권한 불가. 기본 PGlite 로컬 모드 구현. /tmp/autoblogger-postgres에 Ubuntu 패키지를 추출해 실제 PostgreSQL16.15 포트55432, /tmp/autoblogger-redis Redis7 포트56379 실행 성공.
 - Supabase 정보 없음. 로컬 전용 인증으로 검증하고 운영용 Supabase JWT 검증 경로 구현.
-- 외부 서비스 키 연결 점검 진행 중. 실제 결과만 기록할 것.
+- Ghost6.67 read-only 사이트·글 조회 인증 성공. User-Agent 명시 필요. 기존 운영 글은 수정하지 않음.
+- OpenRouter 초기 $20 잔액 확인. 논리 provider Azure → 정확한 라우팅 slug azure/eu 필요(상위 azure는 regional surcharge 필터에서 제외). 데이터 수집 거부와 fallback 금지 유지. 소액 호출 성공 $0.000132.
+- 실제 Azure mock A/B/C6건 총 $0.0234042, C 첫 토큰 5569/4639ms. .data/evaluations/2026-10-28T18-45-49-483Z. 정식 평가·30분 세션 성능 아님.
+- ps-blogself WSL20+Windows93 workspace storage 제한 탐색: 설정만 발견, 기록 없음. 소스/프롬프트/생성 글 미열람. .data/imported mock exports cpp/python 각9 events 재생용. apps/extension/scripts/create-mock-sessions.ts.
+- 에디터 스파이크 Ghost lexical0.13.1 vs BlockIdExtension0.53 불가 → 명세상 Tiptap fallback. 실제 HTML 카드 JSON 사용, canonical blocks + autobloggerEditor document 저장.
+- 중간 검증:43 unit/integration 통과, PostgreSQL3 동시성 별도 통과, Playwright2 통과. 이후 테스트 추가 진행 중.
+- root 실행 API4000 session22137(코드 변경 후 재시작 필요), Next3000 session53933. API AUTO_SUMMARIES=false 테스트용. PostgreSQL/Redis는 daemon, 비밀키는 .env.local.
+- 현재 팀: api 보안/동시성/게시물 rich HTML 보존 최종 수정; web 추가 브라우저 conflict QA; extension /tmp에 실제 Ghost6.67 로컬 설치 테스트 중.
 
 ## 다음 작업
-- docs/API-CONTRACT.md와 공유 타입을 기준으로 병렬 구현.
-- 테스트·빌드·브라우저 통합 검증 후 빠진 기능 및 보안 경계 재검토.
-- 개발 데이터 검증과 사람의 정식 파일럿/베타 평가를 구분해 보고.
+- API 최신 restart하고 실제 PG+Redis 별도 worker 테스트. 생성→백그라운드 검토→제안→수락/거절→요약·취소·예산 거절 실제 흐름.
+- 모든 unit/typecheck/build 및 추가 browser 회귀. production Next build는 dev 종료 후.
+- 실제 로컬 Ghost 테스트 결과 수집. VSIX 최신 빌드·배포물 제공.
+- docs/message.txt 최종 결과·배포 절차 갱신. Git 작은 commit/push 유지.

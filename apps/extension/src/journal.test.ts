@@ -45,6 +45,21 @@ describe('durable local journal',() => {
 });
 
 describe('source version evidence',() => {
+  it('retains the newly compiled executable version after a combined command runtime crash',async () => {
+    const {dir,journal} = await fixture(); const recorder = new Recorder(journal);
+    await writeFile(path.join(dir,'crash.cpp'),'int main(){return 1;}');
+    const run = await recorder.beginRun('g++ crash.cpp && ./a.out',dir);
+    await recorder.endRun(run!,139,'Segmentation fault');
+    const restarted = new Recorder(await Journal.load(journal.directory));
+    expect((await restarted.beginRun('./a.out',dir))!.snapshotId).toBe(run!.snapshotId);
+  });
+  it('bounds large edit payloads with explicit truncation instead of blocking queue transmission',async () => {
+    const {dir,journal} = await fixture(); const recorder = new Recorder(journal);
+    await recorder.edit(path.join(dir,'large.py'),'a'.repeat(800000),'b'.repeat(800000),2,true);
+    const event = journal.all()[0];
+    expect(event.data.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThan(1024 * 1024);
+  });
   it('recovers in-flight terminal executions as unknown exactly once after a killed host',async () => {
     const {dir,journal} = await fixture();
     await writeFile(path.join(dir,'solve.py'),'print(1)');

@@ -70,6 +70,7 @@ describe('Ghost boundary',()=>{
   let post:any=null;let writes=0;
   const server=createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json');
+    if(req.method==='DELETE'){res.writeHead(204);res.end();return;}
     if(req.method==='GET'){res.end(JSON.stringify({posts:post?[post]:[]}));return;}
     let body='';for await(const part of req)body+=part;const input=JSON.parse(body).posts[0];writes++;
     post={...input,id:'remote-id',updated_at:'2026-10-29T00:00:00.000Z',url:'https://example.com/post'};res.end(JSON.stringify({posts:[post]}));
@@ -82,6 +83,7 @@ describe('Ghost boundary',()=>{
     expect((await client.publish(input)).id).toBe('remote-id');expect(writes).toBe(1);
     await expect(client.publish({...input,remoteId:first.id,expectedUpdatedAt:'old'})).rejects.toMatchObject({code:'GHOST_CONFLICT'});expect(writes).toBe(1);
     await client.publish({...input,status:'published',remoteId:first.id,expectedUpdatedAt:first.updated_at});expect(post.status).toBe('published');
+    await expect(client.deletePost(first.id)).resolves.toBeUndefined();
   }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
  });
 });
