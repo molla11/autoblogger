@@ -125,4 +125,38 @@ describe.skipIf(!url)("real PostgreSQL concurrency", () => {
     ]);
     expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
   });
+  it("does not exhaust the query pool with concurrent source locks or different lock keys", async () => {
+    const project = await api.createProject(user, {
+      name: "parallel ingestion",
+    });
+    const sessions = await Promise.all(
+      Array.from({ length: 15 }, () => api.createSession(user, project.id, {})),
+    );
+    await Promise.all(
+      sessions.map((session) =>
+        api.ingest(user, session.id, {
+          events: [
+            {
+              id: randomUUID(),
+              sessionId: session.id,
+              sequence: 1,
+              type: "snapshot",
+              filePath: "main.py",
+              occurredAt: new Date().toISOString(),
+              data: { content: "print(1)" },
+            },
+          ],
+        }),
+      ),
+    );
+    await Promise.all(
+      Array.from({ length: 15 }, (_, i) =>
+        api.db.withAdvisoryLock("distinct-" + i, () =>
+          api.db.transaction((tx) => tx.query("SELECT pg_sleep(0.005)")),
+        ),
+      ),
+    );
+    for (const session of sessions)
+      expect((await api.session(user, session.id)).events).toHaveLength(1);
+  }, 15000);
 });

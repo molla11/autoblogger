@@ -27,17 +27,17 @@ const entityTables = [
   "device_pairs",
   "uploads",
   "metrics",
+  "source_backups",
 ] as const;
 export type Table =
-  | (typeof entityTables)[number]
-  | "articles"
-  | "users"
-  | "settings";
+  (typeof entityTables)[number] | "articles" | "users" | "settings";
 export class Database implements Sql {
   private pg?: Pool;
+  private lockPool?: Pool;
   private migrationClient?: PoolClient;
   private lite?: PGlite;
   private serial = Promise.resolve();
+  private advisoryQueues = new Map<string, Promise<void>>();
   constructor(
     public readonly location = process.env.DATABASE_URL ||
       path.resolve(process.cwd(), "../../.data/postgres"),
@@ -135,17 +135,33 @@ export class Database implements Sql {
     }
   }
   async withAdvisoryLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    if (!this.pg) return fn();
-    const client = await this.pg.connect();
+    let release!: () => void;
+    const previous = this.advisoryQueues.get(key) || Promise.resolve();
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.then(() => gate);
+    this.advisoryQueues.set(key, queued);
+    await previous;
     try {
-      await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
-      return await fn();
+      if (!this.pg) return await fn();
+      this.lockPool ||= new Pool({ connectionString: this.location, max: 4 });
+      const client = await this.lockPool.connect();
+      try {
+        await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
+        return await fn();
+      } finally {
+        await client.query("SELECT pg_advisory_unlock(hashtext($1))", [key]);
+        client.release();
+      }
     } finally {
-      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [key]);
-      client.release();
+      release();
+      if (this.advisoryQueues.get(key) === queued)
+        this.advisoryQueues.delete(key);
     }
   }
   async close() {
+    await this.lockPool?.end();
     await this.pg?.end();
     await this.lite?.close();
   }

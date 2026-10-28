@@ -13,6 +13,8 @@ import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { Subject } from "rxjs";
+import { SourceBlobStore, SourceRef } from "./source-blobs";
+import { SourceRepository } from "./source-repository";
 import { replaceEditorBlock } from "./rich-text";
 import { Database, Sql, one, list, put, Table } from "./db";
 import { config, validateConfig } from "./config";
@@ -79,7 +81,22 @@ export class ApiService {
   }>();
   onEvents?: (ownerId: string, sessionId: string) => void;
   deleteExternal?: (user: User, article: any) => Promise<void>;
-  constructor() {}
+  sourceStore: SourceBlobStore;
+  sources!: SourceRepository;
+  constructor(options: { sourceStore?: SourceBlobStore } = {}) {
+    if (
+      process.env.SNAPSHOT_STORAGE &&
+      !["local", "supabase"].includes(process.env.SNAPSHOT_STORAGE)
+    )
+      throw new Error("SNAPSHOT_STORAGE must be local or supabase");
+    this.sourceStore =
+      options.sourceStore ||
+      new SourceBlobStore(path.join(config.dataDir, "source-blobs"), {
+        mode:
+          process.env.SNAPSHOT_STORAGE === "supabase" ? "supabase" : "local",
+        bucket: process.env.SUPABASE_SOURCE_BUCKET || "autoblogger-sources",
+      });
+  }
   async init(location?: string) {
     validateConfig();
     await mkdir(config.dataDir, { recursive: true });
@@ -99,6 +116,10 @@ export class ApiService {
         process.env.DATABASE_URL ||
         path.join(config.dataDir, "postgres"),
     ).init();
+    this.sources = new SourceRepository(this.db, this.sourceStore);
+    await this.db.withAdvisoryLock("source-blob-mutations", () =>
+      this.sources.recover(),
+    );
     if (!(await one(this.db, "settings", "ai")))
       await put(this.db, "settings", {
         id: "ai",
@@ -426,12 +447,15 @@ export class ApiService {
   }
   async session(user: User, sessionId: string) {
     const session = await this.owned("sessions", sessionId, user);
-    const events = (
+    const storedEvents = (
       await this.db.query(
         "SELECT data FROM events WHERE owner_id=$1 AND session_id=$2 ORDER BY sequence",
         [user.id, sessionId],
       )
     ).rows.map((x) => x.data);
+    const events = await Promise.all(
+      storedEvents.map((event) => this.sources.hydrate(event, user.id)),
+    );
     const fileIds = new Set(events.map((x) => x.fileId));
     const files = (
       await list(this.db, "files", user.id, session.projectId)
@@ -465,141 +489,175 @@ export class ApiService {
   }
   async ingest(user: User, sessionId: string, body: any) {
     const session = await this.owned("sessions", sessionId, user);
-    const project = await this.owned("projects", session.projectId, user);
+    let project = await this.owned("projects", session.projectId, user);
     if (project.excluded)
       throw new ForbiddenException("Project recording is excluded");
     if (!Array.isArray(body.events) || body.events.length > 1000)
       throw new BadRequestException("Maximum 1000 events per batch");
-    await this.db.transaction(async (tx) => {
-      for (const input of body.events) {
-        if (
-          !input ||
-          !eventTypes.includes(input.type) ||
-          input.sessionId !== sessionId ||
-          !Number.isSafeInteger(input.sequence) ||
-          input.sequence < 1 ||
-          input.sequence > 1000000 ||
-          !input.data ||
-          typeof input.data !== "object"
-        )
-          throw new BadRequestException("Invalid record event");
-        id(input.id);
-        this.date(input.occurredAt);
-        if (Buffer.byteLength(JSON.stringify(input)) > 1500000)
-          throw new BadRequestException("Event too large");
-        const ev = redact({ ...input, ownerId: user.id, receivedAt: now() });
-        if (ev.type === "run" && typeof ev.data.output === "string")
-          ev.data.output = truncateOutput(ev.data.output);
-        if (ev.filePath && !ev.fileId)
-          ev.fileId = digest(`${session.projectId}:${ev.filePath}`);
-        if (ev.type === "snapshot" && typeof ev.data.content === "string")
-          ev.data.hash = digest(ev.data.content);
-        const prior = await tx.query(
-          "SELECT data FROM events WHERE id=$1 OR (session_id=$2 AND sequence=$3)",
-          [ev.id, sessionId, ev.sequence],
-        );
-        if (prior.rows.length) {
-          const p = prior.rows[0].data;
-          const { receivedAt: _a, ownerId: _b, ...a } = p;
-          const { receivedAt: _c, ownerId: _d, ...b } = ev;
-          if (!isDeepStrictEqual(a, b))
-            throw new ConflictException("Event ID or sequence conflicts");
-          continue;
-        }
-        if (ev.filePath) {
-          validPath(ev.filePath);
-          if (
-            project.excludePatterns.some((p: string) =>
-              matchesGlob(ev.filePath, p),
+    const writes: { ref: SourceRef; content: string }[] = [];
+    await this.db.withAdvisoryLock("source-blob-mutations", async () => {
+      await this.owned("sessions", sessionId, user);
+      project = await this.owned("projects", session.projectId, user);
+      if (project.excluded)
+        throw new ForbiddenException("Project recording is excluded");
+      try {
+        await this.db.transaction(async (tx) => {
+          for (const input of body.events) {
+            if (
+              !input ||
+              !eventTypes.includes(input.type) ||
+              input.sessionId !== sessionId ||
+              !Number.isSafeInteger(input.sequence) ||
+              input.sequence < 1 ||
+              input.sequence > 1000000 ||
+              !input.data ||
+              typeof input.data !== "object"
             )
-          )
-            throw new ForbiddenException("File excluded");
-          const fileId =
-            ev.fileId || digest(`${session.projectId}:${ev.filePath}`);
-          const existing = await one(tx, "files", fileId);
-          if (
-            existing &&
-            (existing.ownerId !== user.id ||
-              existing.projectId !== session.projectId ||
-              existing.path !== ev.filePath)
-          )
-            throw new ConflictException("File ID conflicts");
-          if (!existing)
-            await put(
-              tx,
-              "files",
-              {
-                id: fileId,
-                ownerId: user.id,
-                projectId: session.projectId,
-                path: ev.filePath,
-                language: ev.filePath.split(".").at(-1),
-                problemStatement: "",
-                createdAt: now(),
-              },
-              session.projectId,
+              throw new BadRequestException("Invalid record event");
+            if (Object.prototype.hasOwnProperty.call(input.data, "contentRef"))
+              throw new BadRequestException(
+                "contentRef is a server-managed field",
+              );
+            id(input.id);
+            this.date(input.occurredAt);
+            if (Buffer.byteLength(JSON.stringify(input)) > 1500000)
+              throw new BadRequestException("Event too large");
+            const ev = redact({
+              ...input,
+              ownerId: user.id,
+              receivedAt: now(),
+            });
+            if (ev.type === "run" && typeof ev.data.output === "string")
+              ev.data.output = truncateOutput(ev.data.output);
+            if (ev.filePath && !ev.fileId)
+              ev.fileId = digest(`${session.projectId}:${ev.filePath}`);
+            if (ev.type === "snapshot" && typeof ev.data.content === "string")
+              ev.data.hash = digest(ev.data.content);
+            const prior = await tx.query(
+              "SELECT data FROM events WHERE id=$1 OR (session_id=$2 AND sequence=$3)",
+              [ev.id, sessionId, ev.sequence],
             );
-          ev.fileId = fileId;
-        } else if (ev.fileId) {
-          const f = await this.owned("files", ev.fileId, user, tx);
-          if (f.projectId !== session.projectId)
-            throw new BadRequestException("File belongs to another project");
-        }
-        if (["snapshot", "edit"].includes(ev.type) && !ev.fileId)
-          throw new BadRequestException("File required");
-        if (ev.type === "snapshot") {
-          if (
-            typeof ev.data.content !== "string" ||
-            Buffer.byteLength(ev.data.content) > 1048576 ||
-            ev.data.content.includes("\0")
-          )
-            throw new BadRequestException("Invalid snapshot");
-          ev.data.hash = digest(ev.data.content);
-        }
-        await tx.query(
-          "INSERT INTO events(id,owner_id,session_id,sequence,data) VALUES($1,$2,$3,$4,$5)",
-          [ev.id, user.id, sessionId, ev.sequence, JSON.stringify(ev)],
-        );
-        if (ev.type === "snapshot")
-          await tx.query(
-            "INSERT INTO snapshots(id,file_id,hash,data) VALUES($1,$2,$3,$4)",
-            [ev.id, ev.fileId, ev.data.hash, JSON.stringify(ev.data)],
-          );
-        if (ev.type === "edit")
-          await tx.query(
-            "INSERT INTO edits(id,file_id,data) VALUES($1,$2,$3)",
-            [ev.id, ev.fileId, JSON.stringify(ev.data)],
-          );
-        if (ev.type === "run" && ev.data.snapshotId) {
-          const linked = await tx.query("SELECT data FROM events WHERE id=$1", [
-            ev.data.snapshotId,
-          ]);
-          if (
-            linked.rows.length &&
-            (linked.rows[0].data.ownerId !== user.id ||
-              linked.rows[0].data.sessionId !== sessionId ||
-              linked.rows[0].data.type !== "snapshot" ||
-              (ev.fileId && linked.rows[0].data.fileId !== ev.fileId))
-          )
-            throw new BadRequestException(
-              "Run snapshot must belong to the same session and file",
+            if (prior.rows.length) {
+              const p = await this.sources.hydrate(
+                prior.rows[0].data,
+                user.id,
+                tx,
+              );
+              const { receivedAt: _a, ownerId: _b, ...a } = p;
+              const { receivedAt: _c, ownerId: _d, ...b } = ev;
+              if (!isDeepStrictEqual(a, b))
+                throw new ConflictException("Event ID or sequence conflicts");
+              continue;
+            }
+            if (ev.filePath) {
+              validPath(ev.filePath);
+              if (
+                project.excludePatterns.some((p: string) =>
+                  matchesGlob(ev.filePath, p),
+                )
+              )
+                throw new ForbiddenException("File excluded");
+              const fileId =
+                ev.fileId || digest(`${session.projectId}:${ev.filePath}`);
+              const existing = await one(tx, "files", fileId);
+              if (
+                existing &&
+                (existing.ownerId !== user.id ||
+                  existing.projectId !== session.projectId ||
+                  existing.path !== ev.filePath)
+              )
+                throw new ConflictException("File ID conflicts");
+              if (!existing)
+                await put(
+                  tx,
+                  "files",
+                  {
+                    id: fileId,
+                    ownerId: user.id,
+                    projectId: session.projectId,
+                    path: ev.filePath,
+                    language: ev.filePath.split(".").at(-1),
+                    problemStatement: "",
+                    createdAt: now(),
+                  },
+                  session.projectId,
+                );
+              ev.fileId = fileId;
+            } else if (ev.fileId) {
+              const f = await this.owned("files", ev.fileId, user, tx);
+              if (f.projectId !== session.projectId)
+                throw new BadRequestException(
+                  "File belongs to another project",
+                );
+            }
+            if (["snapshot", "edit"].includes(ev.type) && !ev.fileId)
+              throw new BadRequestException("File required");
+            if (ev.type === "snapshot") {
+              if (
+                typeof ev.data.content !== "string" ||
+                Buffer.byteLength(ev.data.content) > 1048576 ||
+                ev.data.content.includes("\0")
+              )
+                throw new BadRequestException("Invalid snapshot");
+              ev.data.hash = digest(ev.data.content);
+              const content = ev.data.content;
+              const ref = this.sourceStore.ref(user.id, sessionId, content);
+              writes.push({ ref, content });
+              await this.sourceStore.restore(ref, user.id, content);
+              ev.data = { ...ev.data, contentRef: ref };
+              delete ev.data.content;
+            }
+            await tx.query(
+              "INSERT INTO events(id,owner_id,session_id,sequence,data) VALUES($1,$2,$3,$4,$5)",
+              [ev.id, user.id, sessionId, ev.sequence, JSON.stringify(ev)],
             );
-        }
-        if (ev.type === "run")
-          await tx.query(
-            "INSERT INTO runs(id,file_id,snapshot_id,data) VALUES($1,$2,$3,$4)",
-            [
-              ev.id,
-              ev.fileId || null,
-              ev.data.snapshotId || null,
-              JSON.stringify(ev.data),
-            ],
-          );
-        if (ev.type === "memo")
-          await tx.query(
-            "INSERT INTO memos(id,file_id,data) VALUES($1,$2,$3)",
-            [ev.id, ev.fileId || null, JSON.stringify(ev.data)],
-          );
+            if (ev.type === "snapshot")
+              await tx.query(
+                "INSERT INTO snapshots(id,file_id,hash,data) VALUES($1,$2,$3,$4)",
+                [ev.id, ev.fileId, ev.data.hash, JSON.stringify(ev.data)],
+              );
+            if (ev.type === "edit")
+              await tx.query(
+                "INSERT INTO edits(id,file_id,data) VALUES($1,$2,$3)",
+                [ev.id, ev.fileId, JSON.stringify(ev.data)],
+              );
+            if (ev.type === "run" && ev.data.snapshotId) {
+              const linked = await tx.query(
+                "SELECT data FROM events WHERE id=$1",
+                [ev.data.snapshotId],
+              );
+              if (
+                linked.rows.length &&
+                (linked.rows[0].data.ownerId !== user.id ||
+                  linked.rows[0].data.sessionId !== sessionId ||
+                  linked.rows[0].data.type !== "snapshot" ||
+                  (ev.fileId && linked.rows[0].data.fileId !== ev.fileId))
+              )
+                throw new BadRequestException(
+                  "Run snapshot must belong to the same session and file",
+                );
+            }
+            if (ev.type === "run")
+              await tx.query(
+                "INSERT INTO runs(id,file_id,snapshot_id,data) VALUES($1,$2,$3,$4)",
+                [
+                  ev.id,
+                  ev.fileId || null,
+                  ev.data.snapshotId || null,
+                  JSON.stringify(ev.data),
+                ],
+              );
+            if (ev.type === "memo")
+              await tx.query(
+                "INSERT INTO memos(id,file_id,data) VALUES($1,$2,$3)",
+                [ev.id, ev.fileId || null, JSON.stringify(ev.data)],
+              );
+          }
+        });
+      } catch (error) {
+        for (const write of writes)
+          await this.sources.discard(write.ref, write.content).catch(() => {});
+        throw error;
       }
     });
     const view = await this.session(user, sessionId);
@@ -1145,7 +1203,7 @@ export class ApiService {
         remote.updated_at !== article.publication.updatedAt ||
         Boolean(
           article.publication.fingerprint &&
-            fingerprint !== article.publication.fingerprint,
+          fingerprint !== article.publication.fingerprint,
         ),
     };
   }
@@ -1398,6 +1456,20 @@ export class ApiService {
   }
   async deleteSession(user: User, sessionId: string) {
     await this.owned("sessions", sessionId, user);
+    return this.db.withAdvisoryLock("source-blob-mutations", async () => {
+      const events = (
+        await this.db.query(
+          "SELECT data FROM events WHERE owner_id=$1 AND session_id=$2",
+          [user.id, sessionId],
+        )
+      ).rows.map((row) => row.data);
+      return this.sources.deleteSafely(events, () =>
+        this.deleteSessionRecords(user, sessionId),
+      );
+    });
+  }
+  private async deleteSessionRecords(user: User, sessionId: string) {
+    await this.owned("sessions", sessionId, user);
     const uploadIds: string[] = [];
     await this.db.transaction(async (tx) => {
       for (const article of await list(tx, "articles", user.id, sessionId)) {
@@ -1464,9 +1536,24 @@ export class ApiService {
         [user.id],
       )
     ).rows.map((x) => x.data);
+    output.events = await Promise.all(
+      output.events.map((event: any) => this.sources.hydrate(event, user.id)),
+    );
     return output;
   }
   async deleteAccount(user: User, body: any) {
+    return this.db.withAdvisoryLock("source-blob-mutations", async () => {
+      const events = (
+        await this.db.query("SELECT data FROM events WHERE owner_id=$1", [
+          user.id,
+        ])
+      ).rows.map((row) => row.data);
+      return this.sources.deleteSafely(events, () =>
+        this.deleteAccountRecords(user, body),
+      );
+    });
+  }
+  private async deleteAccountRecords(user: User, body: any) {
     if (body.deleteGhostPosts) {
       if (!this.deleteExternal)
         throw new BadRequestException("Ghost deletion unavailable");
@@ -1506,7 +1593,21 @@ export class ApiService {
   }
   async retention(user: User) {
     this.admin(user);
-    const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+    return this.db.withAdvisoryLock("source-blob-mutations", async () => {
+      const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+      const events = (
+        await this.db.query(
+          "SELECT data FROM events WHERE data->>'occurredAt'<$1",
+          [cutoff],
+        )
+      ).rows.map((row) => row.data);
+      return this.sources.deleteSafely(events, () =>
+        this.retentionRecords(user, cutoff),
+      );
+    });
+  }
+  private async retentionRecords(user: User, cutoff: string) {
+    this.admin(user);
     const old = await this.db.query(
       `SELECT id,session_id FROM events WHERE data->>'occurredAt'<$1`,
       [cutoff],

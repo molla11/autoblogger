@@ -15,7 +15,10 @@
 - 모든 데이터 조회는 Bearer 인증과 owner 검사. 관리자 기능은 저장된 user.role을 확인한다. Supabase 모드에서는 issuer/audience/JWKS 서명 검증 후 사용자 식별자를 사용한다.
 - 기기 토큰은 해시만 저장. 브라우저→확장 연결 코드는 PKCE와 5분 만료, 원자적 일회용 소비. 기기 폐기는 이후 API/SSE 인증에 반영된다.
 - 주요 엔터티별 PostgreSQL 테이블과 owner FK, events의 `(session_id,sequence)` unique, 정규화된 snapshots/edits/runs/memos. RLS는 켜고 클라이언트 역할 정책은 주지 않는다. DB 연결은 서버 역할만 사용한다.
-- 원본 스냅샷은 현재 PostgreSQL에 저장한다. 업로드 이미지의 로컬 파일 저장과 Supabase 서명 업로드·인증된 다운로드 경로를 지원한다. 서비스 배포 시 private Storage bucket, MIME·용량 제한, 서버 서비스 키를 구성해야 한다.
+- 원본 스냅샷은 기본 `SNAPSHOT_STORAGE=local`에서 `DATA_DIR/source-blobs`의 파일 객체에 저장한다. PostgreSQL의 events/snapshots에는 소유자·세션·내용 해시·바이트 수가 포함된 contentRef만 저장하고, 타임라인·내보내기·AI 입력을 읽을 때 서버가 내용을 복원한다. 이전 버전의 inline JSONB 기록은 그대로 읽을 수 있다.
+- `SNAPSHOT_STORAGE=supabase`, `SUPABASE_SOURCE_BUCKET=autoblogger-sources`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`를 지정하면 원본을 private Supabase Storage bucket에 저장한다. 일반 클라이언트에는 bucket 읽기/쓰기 정책을 부여하지 않는다. 실제 프로젝트 인증은 로컬 범위에서 검증하지 않았으며, 모의 원격 저장소로 업로드·조회·부분 삭제 실패를 검증했다.
+- 저장 키는 소유자/세션 식별자를 각각 SHA-256으로 바꾸고 내용 해시를 붙인다. 클라이언트가 보낸 contentRef는 거절하며 원시 세션 ID를 파일 경로로 사용하지 않는다. 같은 세션의 동일 내용은 한 객체를 공유한다.
+- 이미지의 로컬 파일 저장과 Supabase 서명 업로드·인증된 다운로드 경로도 지원한다. 서비스 배포 시 private bucket, MIME·용량 제한, 서버 서비스 키를 구성해야 한다.
 - Snapshot/Run/Memo 등 전송 내용에서 키·토큰 패턴을 가린다. 중복 재전송은 수신 시각·JSON 객체 키 순서와 무관하게 판별한다. 충돌하는 순번·ID는 409.
 - SQL upsert는 기존 owner와 parent가 같을 때만 수정한다. 다른 계정이 같은 클라이언트 ID를 경쟁 제출해도 덮어쓰지 못한다.
 - Ghost 키는 AES-256-GCM 암호화. 로컬에서는 `.data/encryption.key` 자동 생성, 운영에서는 외부 `ENCRYPTION_KEY` 지정. DB와 키를 함께 백업/복원한다.
@@ -37,6 +40,9 @@
 
 ## 삭제/보관
 
+- 세션·계정 삭제와 보관 기간 만료는 원본 객체도 삭제한다. 아직 다른 이벤트가 참조하는 해시 객체는 유지한다. 원격 객체 삭제 전 임시 복구 사본을 DB에 내구성 있게 저장하므로 부분 삭제·DB 실패 시 기록을 잃지 않고 읽기/재시도를 계속할 수 있다. 전부 성공하면 복구 사본도 삭제하며, 재시작 시 남은 복구 사본을 원본 복원 또는 객체 정리로 처리한다.
+- 원본 ingest/삭제/복구는 전역 advisory lock으로 직렬화한다. 프로세스 내부 mutex와 별도의 PostgreSQL lock pool을 사용해 동시 요청이 일반 query pool을 고갈시키지 않도록 한다. 로컬 API와 별도 worker는 같은 DATA_DIR/volume 또는 같은 Supabase bucket 설정을 공유해야 한다.
+
 - 프로젝트/세션 삭제는 관련 글·버전·근거·요약·시도·기록과 작업 복사본을 삭제한다. ModelRun은 비용 메타데이터를 남기고 input/output을 지운다.
 - 90일 보관 작업은 원본 이벤트와 파생 요약/시도를 지우고, 현재/과거 문서의 만료 근거 링크와 AI 작업·입출력 복사본을 제거한다. 글 자체는 유지한다.
 - 계정 삭제는 연결된 업로드 파일도 지운다. Ghost 글 삭제는 요청의 명시적 `deleteGhostPosts=true` 때만 실행하고, 기본은 Ghost 글을 보존한다. 외부 백업 보관은 제공자 정책에 따른다.
@@ -44,7 +50,7 @@
 ## 검증 명령
 
 - `pnpm --filter @autoblogger/api typecheck`
-- `pnpm exec vitest run apps/api/test/api.test.ts`
+- `pnpm exec vitest run apps/api/test/api.test.ts apps/api/test/source-blobs.test.ts`
 - `API_TEST_DATABASE_URL=postgresql://USER@HOST:PORT/postgres pnpm exec vitest run apps/api/test/postgres.test.ts`
 
 PostgreSQL 테스트는 임시 데이터베이스를 만들고 마지막에 삭제하므로 CREATE DATABASE 권한이 있는 로컬 테스트 계정을 사용한다. 실제 PostgreSQL에서 동시 저장, PKCE 일회성, AI 등록 경합, 다른 소유자의 클라이언트 ID 경합을 검증한다. 사람의 베타/평가 완료를 뜻하지 않는다.
@@ -57,3 +63,5 @@ PostgreSQL 테스트는 임시 데이터베이스를 만들고 마지막에 삭�
 - Ghost의 원격 업데이트 시각은 초 단위일 수 있다. fingerprint를 읽기 직전 비교하지만 Ghost 자체가 내용 fingerprint를 쓰기 조건으로 지원하지 않으므로 원격 preflight와 PUT 사이 외부 동시 쓰기까지 완전한 원자성을 보장하지는 않는다.
 
 - 같은 글의 동시 발행 등록은 사용자 행 lock 아래 한 건만 허용한다. 원격 전송도 글별 PostgreSQL advisory lock으로 직렬화한다. BullMQ가 중단된 running 작업을 다시 전달하면 재개하며, 실행 토큰으로 이전 worker의 상태 덮어쓰기를 차단한다. 최대 5회 실행 후 오류로 남겨 무한 재시도를 막는다.
+
+최종 추가 검증: 기존 PGlite 22개, source blob 7개, 실제 PostgreSQL 7개(15개 동시 ingest와 여러 advisory lock key의 query pool 고갈 회귀 포함), 합계 36개 통과.
