@@ -1,40 +1,96 @@
-import {test,expect} from '@playwright/test';
-const API='http://127.0.0.1:4000/api';
-test('local onboarding, source timeline, admin settings and responsive workspace',async({page})=>{
- const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto('/');await page.getByRole('button',{name:'작업 공간 열기'}).click();
- await expect(page.getByRole('heading',{name:/오늘의 풀이가/})).toBeVisible();
- await page.getByRole('button',{name:'샘플로 둘러보기'}).click();
- await expect(page.getByText('기능 체험용 샘플 기록을 만들었습니다.',{exact:false})).toBeVisible();
- await expect(page.getByRole('button',{name:/초안/}).first()).toBeVisible();
- await page.getByRole('button',{name:'관리자',exact:true}).click();
- await expect(page.getByRole('heading',{name:'운영 현황'})).toBeVisible();
- await expect(page.getByLabel('OpenRouter 모델 ID')).toHaveValue('openai/gpt-6.1-terra');
- await expect(page.getByLabel('Provider',{exact:true})).toHaveValue('Azure');
- await page.getByRole('button',{name:'AI 설정 저장'}).click();
- await expect(page.getByText('이후 등록하는 AI 작업부터 새 설정을 적용합니다.')).toBeVisible();
- await page.setViewportSize({width:390,height:844});
- await expect(page.getByRole('button',{name:'메뉴 열기'})).toBeVisible();
- await page.screenshot({path:'.data/screenshots/mobile-admin.png',fullPage:true});
- expect(errors).toEqual([]);
+import { test, expect } from "@playwright/test";
+const API = "http://127.0.0.1:4000/api";
+test("local onboarding, source timeline, admin settings and responsive workspace", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.getByRole("button", { name: "작업 공간 열기" }).click();
+  await expect(
+    page.getByRole("heading", { name: /오늘의 풀이가/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "샘플로 둘러보기" }).click();
+  await expect(
+    page.getByText("기능 체험용 샘플 기록을 만들었습니다.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /초안/ }).first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "관리자", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "운영 현황" })).toBeVisible();
+  await expect(page.getByLabel("OpenRouter 모델 ID")).toHaveValue(
+    "openai/gpt-6.1-terra",
+  );
+  await expect(page.getByLabel("Provider", { exact: true })).toHaveValue(
+    "Azure",
+  );
+  await page.getByRole("button", { name: "AI 설정 저장" }).click();
+  await expect(
+    page.getByText("이후 등록하는 AI 작업부터 새 설정을 적용합니다."),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "메뉴 열기" })).toBeVisible();
+  await page.screenshot({
+    path: ".data/screenshots/mobile-admin.png",
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
 });
-test('editor saves, previews and exports a source-linked document without AI spend',async({page,request})=>{
- const login=await request.post(API+'/auth/local',{data:{email:'admin@local.test'}});const {token}=await login.json();
- const headers={Authorization:'Bearer '+token};const sample=await (await request.post(API+'/samples',{headers})).json();
- const article=await (await request.post(API+'/articles',{headers,data:{sessionId:sample.session.id,title:'브라우저 검증 글'}})).json();
- await page.goto('/');await page.evaluate(t=>localStorage.setItem('autoblogger.session',t),token);await page.reload();
- await page.getByRole('button',{name:/글 보관함/}).first().click();
- await page.getByText('브라우저 검증 글',{exact:true}).first().click();
- await page.getByLabel('글 제목').fill('브라우저 자동 저장 확인');
- const editor=page.locator('[contenteditable="true"]').first();await editor.fill('실패한 실행과 수정 내용을 직접 기록합니다.');
- await expect.poll(async()=>{const r=await request.get(API+'/articles/'+article.id,{headers});return (await r.json()).title;}).toBe('브라우저 자동 저장 확인');
- await expect(page.getByText(/저장됨 · v/)).toBeVisible();
- await page.getByRole('button',{name:'미리보기',exact:true}).click();
- await expect(page.getByRole('dialog')).toBeVisible();
- await expect(page.frameLocator('iframe[title="글 발행 미리보기"]').getByText('실패한 실행과 수정 내용을 직접 기록합니다.')).toBeVisible();
- await page.getByRole('button',{name:'닫기',exact:true}).click();
- await page.screenshot({path:'.data/screenshots/editor.png',fullPage:true});
- const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'Markdown',exact:true}).click();
- expect((await downloaded).suggestedFilename()).toMatch(/\.md$/);
- await page.getByRole('button',{name:'버전',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('문서 버전');
+test("editor saves, previews and exports a source-linked document without AI spend", async ({
+  page,
+  request,
+}) => {
+  const login = await request.post(API + "/auth/local", {
+    data: { email: "admin@local.test" },
+  });
+  const { token } = await login.json();
+  const headers = { Authorization: "Bearer " + token };
+  const sample = await (
+    await request.post(API + "/samples", { headers })
+  ).json();
+  const article = await (
+    await request.post(API + "/articles", {
+      headers,
+      data: { sessionId: sample.session.id, title: "브라우저 검증 글" },
+    })
+  ).json();
+  await page.goto("/");
+  await page.evaluate(
+    (t) => localStorage.setItem("autoblogger.session", t),
+    token,
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: /글 보관함/ })
+    .first()
+    .click();
+  await page.getByText("브라우저 검증 글", { exact: true }).first().click();
+  await page.getByLabel("글 제목").fill("브라우저 자동 저장 확인");
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.fill("실패한 실행과 수정 내용을 직접 기록합니다.");
+  await expect
+    .poll(async () => {
+      const r = await request.get(API + "/articles/" + article.id, { headers });
+      return (await r.json()).title;
+    })
+    .toBe("브라우저 자동 저장 확인");
+  await expect(page.getByText(/저장됨 · v/)).toBeVisible();
+  await page.getByRole("button", { name: "미리보기", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(
+    page
+      .frameLocator('iframe[title="글 발행 미리보기"]')
+      .getByText("실패한 실행과 수정 내용을 직접 기록합니다."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.screenshot({
+    path: ".data/screenshots/editor.png",
+    fullPage: true,
+  });
+  const downloaded = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  expect((await downloaded).suggestedFilename()).toMatch(/\.md$/);
+  await page.getByRole("button", { name: "버전", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("문서 버전");
 });

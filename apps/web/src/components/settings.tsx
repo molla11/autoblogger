@@ -1,22 +1,315 @@
-'use client';
-import {useEffect,useState} from 'react';
-import {Cable,Check,ExternalLink,FileDown,KeyRound,Laptop,Link2,Plus,Shield,Trash2,Unplug,UserRound} from 'lucide-react';
-import {api,post,download,date,errorMessage} from '@/lib/api';
-import type {User,Device} from '@/lib/types';
-import {Badge,Modal,Empty} from './ui';
-export default function Settings({user,notify,onLogout}:{user:User;notify:(s:string,error?:boolean)=>void;onLogout:()=>void}){
- const [ghost,setGhost]=useState<{connected:boolean;url?:string}>({connected:false}),[devices,setDevices]=useState<Device[]>([]),[url,setUrl]=useState('https://cms.shinem.dev'),[key,setKey]=useState(''),[busy,setBusy]=useState(false),[deleteModal,setDeleteModal]=useState(false),[deleteGhost,setDeleteGhost]=useState(false),[confirmation,setConfirmation]=useState('');
- const refresh=()=>{api<typeof ghost>('/ghost').then(value=>{setGhost(value);if(value.url)setUrl(value.url)}).catch(()=>{});api<Device[]>('/devices').then(setDevices).catch(e=>notify(errorMessage(e),true))};
- useEffect(refresh,[notify]);
- async function connect(e:React.FormEvent){e.preventDefault();setBusy(true);try{setGhost(await post('/ghost',{url,key}));setKey('');notify('Ghost 연결을 확인했습니다.');}catch(e){notify(errorMessage(e),true)}finally{setBusy(false)}}
- async function disconnect(){if(!confirm('Ghost 연결을 해제할까요? 이미 발행된 글은 유지됩니다.'))return;try{await api('/ghost',{method:'DELETE'});setGhost({connected:false});notify('Ghost 연결을 해제했습니다.')}catch(e){notify(errorMessage(e),true)}}
- async function revoke(id:string){try{await api(`/devices/${id}`,{method:'DELETE'});refresh();notify('기기 인증을 폐기했습니다.')}catch(e){notify(errorMessage(e),true)}}
- async function exportAccount(){try{download('autoblogger-export.json',await api('/account/export'));notify('전체 데이터를 내보냈습니다.')}catch(e){notify(errorMessage(e),true)}}
- async function deleteAccount(){if(confirmation!=='삭제')return;setBusy(true);try{await api('/account',{method:'DELETE',body:JSON.stringify({deleteGhostPosts:deleteGhost})});onLogout();}catch(e){notify(errorMessage(e),true)}finally{setBusy(false)}}
- return <section className="settings-page"><div className="page-heading"><div className="eyebrow">YOUR WORKSPACE</div><h1>연결과 데이터</h1><p>내 기록이 어디에 저장되고, 어디로 발행되는지 관리하세요.</p></div><div className="settings-grid"><section className="card settings-card"><div className="card-title"><Cable size={20}/><h2>Ghost 연결</h2><Badge tone={ghost.connected?'green':'neutral'}>{ghost.connected?'연결됨':'연결 필요'}</Badge></div><p className="muted">선택한 글만 Ghost에 전송됩니다. 공개 사이트의 기존 배포 경로를 그대로 사용합니다.</p><form onSubmit={connect}><label>CMS 주소<input type="url" value={url} onChange={e=>setUrl(e.target.value)} required placeholder="https://cms.example.com"/></label><label>Admin API Key<input type="password" autoComplete="new-password" value={key} onChange={e=>setKey(e.target.value)} required placeholder="id:secret"/></label><p className="field-hint">Ghost 설정 → Integrations → Custom Integration의 Admin API Key를 입력하세요.</p><div className="actions"><button className="button primary" disabled={busy}>{busy?'연결 확인 중…':ghost.connected?'연결 정보 변경':'Ghost 연결'}</button>{ghost.connected&&<button type="button" className="button subtle" onClick={disconnect}><Unplug size={15}/>연결 해제</button>}</div></form><details className="setup-details"><summary>코드 구문 강조 안내</summary><p>코드와 diff의 색상은 Ghost 테마 또는 정적 사이트에서 설정합니다. 사용하는 구문 강조 도구에 맞춰 language-cpp, language-python, language-diff 클래스를 지원해 주세요.</p><pre className="code">{'<!-- Ghost Settings → Code injection: 테마의 코드 스타일 예시 -->\n<style>pre{overflow:auto;padding:1.25rem;background:#f3f5f2}\ncode{font-family:ui-monospace,monospace}\n.language-diff{white-space:pre}</style>'}</pre></details></section>
- <section className="card settings-card"><div className="card-title"><Laptop size={20}/><h2>연결된 기기</h2></div><p className="muted">VS Code 확장에서 「Autoblogger: 로그인」을 실행하면 브라우저에서 연결을 승인할 수 있습니다.</p>{devices.filter(d=>!d.revokedAt).length?<div className="device-list">{devices.filter(d=>!d.revokedAt).map(d=><div key={d.id}><Laptop size={18}/><span><strong>{d.name}</strong><small>{date(d.lastSeenAt||d.createdAt)}</small></span><button className="button subtle danger" onClick={()=>void revoke(d.id)}>폐기</button></div>)}</div>:<Empty icon={<Laptop/>} title="연결된 기기가 없어요">확장을 설치하고 이 계정에 연결해 주세요.</Empty>}<div className="notice">실행 기록은 VS Code 통합 터미널에서만 관찰합니다. 확장은 코드를 실행하지 않습니다.</div></section>
- <section className="card settings-card"><div className="card-title"><Shield size={20}/><h2>내 데이터</h2></div><p className="muted">원본 기록 기본 보관 기간은 90일입니다. 글과 버전은 직접 삭제할 때까지 보관합니다.</p><div className="data-action"><span><strong>전체 데이터 내보내기</strong><small>프로젝트, 기록, 글과 설정을 JSON으로 저장합니다.</small></span><button className="button secondary" onClick={exportAccount}><FileDown size={16}/>내보내기</button></div><div className="data-action"><span><strong>계정과 데이터 삭제</strong><small>원본 기록과 파생 데이터를 함께 삭제합니다.</small></span><button className="button subtle danger" onClick={()=>setDeleteModal(true)}><Trash2 size={16}/>삭제</button></div><a className="text-button" href="/privacy" target="_blank">개인정보와 보관 정책 <ExternalLink size={13}/></a></section>
- <section className="card settings-card"><div className="card-title"><UserRound size={20}/><h2>계정</h2></div><p><strong>{user.email}</strong> <Badge>{user.role==='admin'?'관리자':'사용자'}</Badge></p><p className="muted">AI 한도에 도달해도 기록·편집·발행은 계속 사용할 수 있습니다.</p><button className="button subtle" onClick={onLogout}>로그아웃</button></section></div>
- {deleteModal&&<Modal title="계정과 데이터 삭제" onClose={()=>setDeleteModal(false)}><p>이 계정의 기록과 글을 삭제합니다. 필요한 데이터는 먼저 내보내 주세요.</p><label className="checkbox"><input type="checkbox" checked={deleteGhost} onChange={e=>setDeleteGhost(e.target.checked)}/>이 서비스에서 연결한 Ghost 글도 삭제</label><p className="muted">이미 배포된 정적 페이지, 외부 캐시와 백업은 해당 시스템에서 별도 처리해야 합니다.</p><label>계속하려면 ‘삭제’를 입력하세요<input value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></label><button className="button destructive" disabled={busy||confirmation!=='삭제'} onClick={deleteAccount}>데이터 삭제</button></Modal>}
- </section>;
+"use client";
+import { useEffect, useState } from "react";
+import {
+  Cable,
+  Check,
+  ExternalLink,
+  FileDown,
+  KeyRound,
+  Laptop,
+  Link2,
+  Plus,
+  Shield,
+  Trash2,
+  Unplug,
+  UserRound,
+} from "lucide-react";
+import { api, post, download, date, errorMessage } from "@/lib/api";
+import type { User, Device } from "@/lib/types";
+import { Badge, Modal, Empty } from "./ui";
+export default function Settings({
+  user,
+  notify,
+  onLogout,
+}: {
+  user: User;
+  notify: (s: string, error?: boolean) => void;
+  onLogout: () => void;
+}) {
+  const [ghost, setGhost] = useState<{ connected: boolean; url?: string }>({
+      connected: false,
+    }),
+    [devices, setDevices] = useState<Device[]>([]),
+    [url, setUrl] = useState("https://cms.shinem.dev"),
+    [key, setKey] = useState(""),
+    [busy, setBusy] = useState(false),
+    [deleteModal, setDeleteModal] = useState(false),
+    [deleteGhost, setDeleteGhost] = useState(false),
+    [confirmation, setConfirmation] = useState("");
+  const refresh = () => {
+    api<typeof ghost>("/ghost")
+      .then((value) => {
+        setGhost(value);
+        if (value.url) setUrl(value.url);
+      })
+      .catch(() => {});
+    api<Device[]>("/devices")
+      .then(setDevices)
+      .catch((e) => notify(errorMessage(e), true));
+  };
+  useEffect(refresh, [notify]);
+  async function connect(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      setGhost(await post("/ghost", { url, key }));
+      setKey("");
+      notify("Ghost 연결을 확인했습니다.");
+    } catch (e) {
+      notify(errorMessage(e), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function disconnect() {
+    if (!confirm("Ghost 연결을 해제할까요? 이미 발행된 글은 유지됩니다."))
+      return;
+    try {
+      await api("/ghost", { method: "DELETE" });
+      setGhost({ connected: false });
+      notify("Ghost 연결을 해제했습니다.");
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  }
+  async function revoke(id: string) {
+    try {
+      await api(`/devices/${id}`, { method: "DELETE" });
+      refresh();
+      notify("기기 인증을 폐기했습니다.");
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  }
+  async function exportAccount() {
+    try {
+      download("autoblogger-export.json", await api("/account/export"));
+      notify("전체 데이터를 내보냈습니다.");
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  }
+  async function deleteAccount() {
+    if (confirmation !== "삭제") return;
+    setBusy(true);
+    try {
+      await api("/account", {
+        method: "DELETE",
+        body: JSON.stringify({ deleteGhostPosts: deleteGhost }),
+      });
+      onLogout();
+    } catch (e) {
+      notify(errorMessage(e), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="settings-page">
+      <div className="page-heading">
+        <div className="eyebrow">YOUR WORKSPACE</div>
+        <h1>연결과 데이터</h1>
+        <p>내 기록이 어디에 저장되고, 어디로 발행되는지 관리하세요.</p>
+      </div>
+      <div className="settings-grid">
+        <section className="card settings-card">
+          <div className="card-title">
+            <Cable size={20} />
+            <h2>Ghost 연결</h2>
+            <Badge tone={ghost.connected ? "green" : "neutral"}>
+              {ghost.connected ? "연결됨" : "연결 필요"}
+            </Badge>
+          </div>
+          <p className="muted">
+            선택한 글만 Ghost에 전송됩니다. 공개 사이트의 기존 배포 경로를
+            그대로 사용합니다.
+          </p>
+          <form onSubmit={connect}>
+            <label>
+              CMS 주소
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                required
+                placeholder="https://cms.example.com"
+              />
+            </label>
+            <label>
+              Admin API Key
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                required
+                placeholder="id:secret"
+              />
+            </label>
+            <p className="field-hint">
+              Ghost 설정 → Integrations → Custom Integration의 Admin API Key를
+              입력하세요.
+            </p>
+            <div className="actions">
+              <button className="button primary" disabled={busy}>
+                {busy
+                  ? "연결 확인 중…"
+                  : ghost.connected
+                    ? "연결 정보 변경"
+                    : "Ghost 연결"}
+              </button>
+              {ghost.connected && (
+                <button
+                  type="button"
+                  className="button subtle"
+                  onClick={disconnect}
+                >
+                  <Unplug size={15} />
+                  연결 해제
+                </button>
+              )}
+            </div>
+          </form>
+          <details className="setup-details">
+            <summary>코드 구문 강조 안내</summary>
+            <p>
+              코드와 diff의 색상은 Ghost 테마 또는 정적 사이트에서 설정합니다.
+              사용하는 구문 강조 도구에 맞춰 language-cpp, language-python,
+              language-diff 클래스를 지원해 주세요.
+            </p>
+            <pre className="code">
+              {
+                "<!-- Ghost Settings → Code injection: 테마의 코드 스타일 예시 -->\n<style>pre{overflow:auto;padding:1.25rem;background:#f3f5f2}\ncode{font-family:ui-monospace,monospace}\n.language-diff{white-space:pre}</style>"
+              }
+            </pre>
+          </details>
+        </section>
+        <section className="card settings-card">
+          <div className="card-title">
+            <Laptop size={20} />
+            <h2>연결된 기기</h2>
+          </div>
+          <p className="muted">
+            VS Code 확장에서 「Autoblogger: 로그인」을 실행하면 브라우저에서
+            연결을 승인할 수 있습니다.
+          </p>
+          {devices.filter((d) => !d.revokedAt).length ? (
+            <div className="device-list">
+              {devices
+                .filter((d) => !d.revokedAt)
+                .map((d) => (
+                  <div key={d.id}>
+                    <Laptop size={18} />
+                    <span>
+                      <strong>{d.name}</strong>
+                      <small>{date(d.lastSeenAt || d.createdAt)}</small>
+                    </span>
+                    <button
+                      className="button subtle danger"
+                      onClick={() => void revoke(d.id)}
+                    >
+                      폐기
+                    </button>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <Empty icon={<Laptop />} title="연결된 기기가 없어요">
+              확장을 설치하고 이 계정에 연결해 주세요.
+            </Empty>
+          )}
+          <div className="notice">
+            실행 기록은 VS Code 통합 터미널에서만 관찰합니다. 확장은 코드를
+            실행하지 않습니다.
+          </div>
+        </section>
+        <section className="card settings-card">
+          <div className="card-title">
+            <Shield size={20} />
+            <h2>내 데이터</h2>
+          </div>
+          <p className="muted">
+            원본 기록 기본 보관 기간은 90일입니다. 글과 버전은 직접 삭제할
+            때까지 보관합니다.
+          </p>
+          <div className="data-action">
+            <span>
+              <strong>전체 데이터 내보내기</strong>
+              <small>프로젝트, 기록, 글과 설정을 JSON으로 저장합니다.</small>
+            </span>
+            <button className="button secondary" onClick={exportAccount}>
+              <FileDown size={16} />
+              내보내기
+            </button>
+          </div>
+          <div className="data-action">
+            <span>
+              <strong>계정과 데이터 삭제</strong>
+              <small>원본 기록과 파생 데이터를 함께 삭제합니다.</small>
+            </span>
+            <button
+              className="button subtle danger"
+              onClick={() => setDeleteModal(true)}
+            >
+              <Trash2 size={16} />
+              삭제
+            </button>
+          </div>
+          <a className="text-button" href="/privacy" target="_blank">
+            개인정보와 보관 정책 <ExternalLink size={13} />
+          </a>
+        </section>
+        <section className="card settings-card">
+          <div className="card-title">
+            <UserRound size={20} />
+            <h2>계정</h2>
+          </div>
+          <p>
+            <strong>{user.email}</strong>{" "}
+            <Badge>{user.role === "admin" ? "관리자" : "사용자"}</Badge>
+          </p>
+          <p className="muted">
+            AI 한도에 도달해도 기록·편집·발행은 계속 사용할 수 있습니다.
+          </p>
+          <button className="button subtle" onClick={onLogout}>
+            로그아웃
+          </button>
+        </section>
+      </div>
+      {deleteModal && (
+        <Modal title="계정과 데이터 삭제" onClose={() => setDeleteModal(false)}>
+          <p>
+            이 계정의 기록과 글을 삭제합니다. 필요한 데이터는 먼저 내보내
+            주세요.
+          </p>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={deleteGhost}
+              onChange={(e) => setDeleteGhost(e.target.checked)}
+            />
+            이 서비스에서 연결한 Ghost 글도 삭제
+          </label>
+          <p className="muted">
+            이미 배포된 정적 페이지, 외부 캐시와 백업은 해당 시스템에서 별도
+            처리해야 합니다.
+          </p>
+          <label>
+            계속하려면 ‘삭제’를 입력하세요
+            <input
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+          </label>
+          <button
+            className="button destructive"
+            disabled={busy || confirmation !== "삭제"}
+            onClick={deleteAccount}
+          >
+            데이터 삭제
+          </button>
+        </Modal>
+      )}
+    </section>
+  );
 }

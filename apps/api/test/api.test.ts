@@ -1,51 +1,614 @@
-import { beforeAll,afterAll,describe,it,expect,vi } from 'vitest';
-import { createHash,randomUUID } from 'node:crypto';
-import { ApiService,User } from '../src/service';
-import { one,put,list } from '../src/db';
-import { replaceEditorBlock } from '../src/rich-text';
-import { matchesGlob } from '../src/security';
-import { JobService } from '../src/jobs';
-let api:ApiService,a:User,b:User,admin:User;
-beforeAll(async()=>{api=await new ApiService().init('memory://');a=await api.userByEmail('alice@local.test');b=await api.userByEmail('bob@local.test');admin=await api.userByEmail('admin@local.test');},30000);
-afterAll(async()=>api?.close());
-describe('tenant isolation and revocable authentication',()=>{
- it('rejects access to another account project/session/article',async()=>{const p=await api.createProject(a,{name:'private'}),s=await api.createSession(a,p.id,{}),article=await api.createArticle(a,{sessionId:s.id});await expect(api.sessions(b,p.id)).rejects.toMatchObject({status:404});await expect(api.session(b,s.id)).rejects.toMatchObject({status:404});await expect(api.owned('articles',article.id,b)).rejects.toMatchObject({status:404});expect(await api.projects(b)).toEqual([]);});
- it('uses single-use PKCE codes and revokes device tokens',async()=>{const verifier='x'.repeat(43),challenge=createHash('sha256').update(verifier).digest('base64url');const {code}=await api.pair(a,{challenge,name:'test WSL'});await expect(api.exchange({code,verifier:'y'.repeat(43)})).rejects.toMatchObject({status:401});const connected=await api.exchange({code,verifier});expect((await api.authenticate('Bearer '+connected.token)).id).toBe(a.id);await expect(api.exchange({code,verifier})).rejects.toMatchObject({status:401});await api.revokeDevice(a,connected.device.id);await expect(api.authenticate('Bearer '+connected.token)).rejects.toMatchObject({status:401});expect((await api.devices(a))[0]).not.toHaveProperty('tokenHash');});
- it('enforces admin-only settings and validates usage limits',async()=>{await expect(api.updateSettings(a,{model:'a',provider:'b'})).rejects.toMatchObject({status:403});await expect(api.setLimits(admin,a.id,{dailyLimit:-1})).rejects.toMatchObject({status:400});expect(await api.settings(admin)).toMatchObject({model:'openai/gpt-6.1-terra',provider:'Azure'});});
+import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
+import { createHash, randomUUID } from "node:crypto";
+import { ApiService, User } from "../src/service";
+import { one, put, list } from "../src/db";
+import { replaceEditorBlock } from "../src/rich-text";
+import { matchesGlob } from "../src/security";
+import { JobService } from "../src/jobs";
+let api: ApiService, a: User, b: User, admin: User;
+beforeAll(async () => {
+  api = await new ApiService().init("memory://");
+  a = await api.userByEmail("alice@local.test");
+  b = await api.userByEmail("bob@local.test");
+  admin = await api.userByEmail("admin@local.test");
+}, 30000);
+afterAll(async () => api?.close());
+describe("tenant isolation and revocable authentication", () => {
+  it("rejects access to another account project/session/article", async () => {
+    const p = await api.createProject(a, { name: "private" }),
+      s = await api.createSession(a, p.id, {}),
+      article = await api.createArticle(a, { sessionId: s.id });
+    await expect(api.sessions(b, p.id)).rejects.toMatchObject({ status: 404 });
+    await expect(api.session(b, s.id)).rejects.toMatchObject({ status: 404 });
+    await expect(api.owned("articles", article.id, b)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await api.projects(b)).toEqual([]);
+  });
+  it("uses single-use PKCE codes and revokes device tokens", async () => {
+    const verifier = "x".repeat(43),
+      challenge = createHash("sha256").update(verifier).digest("base64url");
+    const { code } = await api.pair(a, { challenge, name: "test WSL" });
+    await expect(
+      api.exchange({ code, verifier: "y".repeat(43) }),
+    ).rejects.toMatchObject({ status: 401 });
+    const connected = await api.exchange({ code, verifier });
+    expect((await api.authenticate("Bearer " + connected.token)).id).toBe(a.id);
+    await expect(api.exchange({ code, verifier })).rejects.toMatchObject({
+      status: 401,
+    });
+    await api.revokeDevice(a, connected.device.id);
+    await expect(
+      api.authenticate("Bearer " + connected.token),
+    ).rejects.toMatchObject({ status: 401 });
+    expect((await api.devices(a))[0]).not.toHaveProperty("tokenHash");
+  });
+  it("enforces admin-only settings and validates usage limits", async () => {
+    await expect(
+      api.updateSettings(a, { model: "a", provider: "b" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      api.setLimits(admin, a.id, { dailyLimit: -1 }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(await api.settings(admin)).toMatchObject({
+      model: "openai/gpt-6.1-terra",
+      provider: "Azure",
+    });
+  });
 });
-describe('offline idempotence and code records',()=>{
- it('reports gaps then acknowledges only contiguous events and survives duplicate retransmission',async()=>{const p=await api.createProject(a,{name:'sync'}),s=await api.createSession(a,p.id,{id:'offline-id'});expect((await api.createSession(a,p.id,{id:'offline-id'})).id).toBe(s.id);const event=(seq:number)=>({id:randomUUID(),sessionId:s.id,sequence:seq,type:'memo',occurredAt:new Date().toISOString(),data:{text:'event'+seq}});const first=event(1),third=event(3),second=event(2);expect(await api.ingest(a,s.id,{events:[third,first]})).toMatchObject({ackThrough:1,gaps:[2]});expect(await api.ingest(a,s.id,{events:[first,second,third]})).toMatchObject({ackThrough:3,gaps:[]});expect((await api.session(a,s.id)).events).toHaveLength(3);await expect(api.ingest(a,s.id,{events:[{...first,data:{text:'different'}}]})).rejects.toMatchObject({status:409});});
- it('rejects event payload session spoofing and atomic batch rollback',async()=>{const p=await api.createProject(a,{name:'batch'}),s=await api.createSession(a,p.id,{});const event={id:randomUUID(),sessionId:s.id,sequence:1,type:'memo',occurredAt:new Date().toISOString(),data:{text:'okay'}};await expect(api.ingest(a,s.id,{events:[event,{...event,id:randomUUID(),sequence:2,sessionId:'wrong'}]})).rejects.toMatchObject({status:400});expect((await api.session(a,s.id)).events).toHaveLength(0);});
- it('redacts credential patterns and rejects binary or oversized snapshots',async()=>{const p=await api.createProject(a,{name:'secret'}),s=await api.createSession(a,p.id,{});const ev={id:randomUUID(),sessionId:s.id,sequence:1,type:'snapshot',filePath:'main.py',occurredAt:new Date().toISOString(),data:{content:'key="sk-or-v1-'+'a'.repeat(40)+'"',hash:'raw'}};await api.ingest(a,s.id,{events:[ev]});const view=await api.session(a,s.id);expect(view.events[0].data.content).toContain('[REDACTED]');await expect(api.ingest(a,s.id,{events:[{...ev,id:randomUUID(),sequence:2,data:{content:'x\0y'}}]})).rejects.toMatchObject({status:400});});
+describe("offline idempotence and code records", () => {
+  it("reports gaps then acknowledges only contiguous events and survives duplicate retransmission", async () => {
+    const p = await api.createProject(a, { name: "sync" }),
+      s = await api.createSession(a, p.id, { id: "offline-id" });
+    expect((await api.createSession(a, p.id, { id: "offline-id" })).id).toBe(
+      s.id,
+    );
+    const event = (seq: number) => ({
+      id: randomUUID(),
+      sessionId: s.id,
+      sequence: seq,
+      type: "memo",
+      occurredAt: new Date().toISOString(),
+      data: { text: "event" + seq },
+    });
+    const first = event(1),
+      third = event(3),
+      second = event(2);
+    expect(await api.ingest(a, s.id, { events: [third, first] })).toMatchObject(
+      { ackThrough: 1, gaps: [2] },
+    );
+    expect(
+      await api.ingest(a, s.id, { events: [first, second, third] }),
+    ).toMatchObject({ ackThrough: 3, gaps: [] });
+    expect((await api.session(a, s.id)).events).toHaveLength(3);
+    await expect(
+      api.ingest(a, s.id, {
+        events: [{ ...first, data: { text: "different" } }],
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it("rejects event payload session spoofing and atomic batch rollback", async () => {
+    const p = await api.createProject(a, { name: "batch" }),
+      s = await api.createSession(a, p.id, {});
+    const event = {
+      id: randomUUID(),
+      sessionId: s.id,
+      sequence: 1,
+      type: "memo",
+      occurredAt: new Date().toISOString(),
+      data: { text: "okay" },
+    };
+    await expect(
+      api.ingest(a, s.id, {
+        events: [
+          event,
+          { ...event, id: randomUUID(), sequence: 2, sessionId: "wrong" },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect((await api.session(a, s.id)).events).toHaveLength(0);
+  });
+  it("redacts credential patterns and rejects binary or oversized snapshots", async () => {
+    const p = await api.createProject(a, { name: "secret" }),
+      s = await api.createSession(a, p.id, {});
+    const ev = {
+      id: randomUUID(),
+      sessionId: s.id,
+      sequence: 1,
+      type: "snapshot",
+      filePath: "main.py",
+      occurredAt: new Date().toISOString(),
+      data: { content: 'key="sk-or-v1-' + "a".repeat(40) + '"', hash: "raw" },
+    };
+    await api.ingest(a, s.id, { events: [ev] });
+    const view = await api.session(a, s.id);
+    expect(view.events[0].data.content).toContain("[REDACTED]");
+    await expect(
+      api.ingest(a, s.id, {
+        events: [
+          { ...ev, id: randomUUID(), sequence: 2, data: { content: "x\0y" } },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
 });
-describe('editor concurrency and evidence',()=>{
- it('protects stale saves, review labels and revisions',async()=>{const {session}=await api.sample(a);const view=await api.session(a,session.id);let article:any=await api.createArticle(a,{sessionId:session.id});const blocks=[{id:'block',type:'paragraph',text:'테스트 결과',evidenceIds:[view.events[1].id],review:'supported'}];const body={title:'test',blocks,lexical:article.lexical,expectedVersion:article.version};article=await api.saveArticle(a,article.id,body);expect(article.blocks[0].review).toBe('needs_review');await expect(api.saveArticle(a,article.id,body)).rejects.toMatchObject({status:409});const reviewed=await api.saveArticle(a,article.id,{...body,blocks:[{...blocks[0],review:'supported'}],expectedVersion:article.version},true);expect(reviewed.blocks[0].review).toBe('supported');const edited=await api.saveArticle(a,article.id,{...body,blocks:[{...blocks[0],text:'changed',review:'supported'}],expectedVersion:reviewed.version});expect(edited.blocks[0].review).toBe('needs_review');expect((await api.revisions(a,article.id)).length).toBe(4);});
- it('rejects stale AI suggestions without replacing current text',async()=>{const {session}=await api.sample(a);const article=await api.createArticle(a,{sessionId:session.id});const suggestion={id:randomUUID(),ownerId:a.id,articleId:article.id,blockId:'block',baseVersion:1,status:'pending',block:{id:'block',type:'paragraph',text:'AI text',evidenceIds:[],review:'needs_review'}};await put(api.db,'suggestions',suggestion,article.id);await api.saveArticle(a,article.id,{title:'user text',blocks:[],lexical:article.lexical,expectedVersion:1});await expect(api.resolveSuggestion(a,suggestion.id,{action:'accept',expectedVersion:2})).rejects.toMatchObject({status:409});expect((await api.owned('articles',article.id,a)).title).toBe('user text');});
- it('limits automatic revisions to fifty while retaining permanent versions',async()=>{const {session}=await api.sample(a);let article:any=await api.createArticle(a,{sessionId:session.id});for(let i=0;i<53;i++)article=await api.saveArticle(a,article.id,{title:'version '+i,blocks:[],lexical:article.lexical,expectedVersion:article.version,kind:'auto'});const revisions=await api.revisions(a,article.id);expect(revisions.filter(x=>x.kind==='auto')).toHaveLength(50);expect(revisions.filter(x=>x.kind==='manual')).toHaveLength(1);},15000);
+describe("editor concurrency and evidence", () => {
+  it("protects stale saves, review labels and revisions", async () => {
+    const { session } = await api.sample(a);
+    const view = await api.session(a, session.id);
+    let article: any = await api.createArticle(a, { sessionId: session.id });
+    const blocks = [
+      {
+        id: "block",
+        type: "paragraph",
+        text: "테스트 결과",
+        evidenceIds: [view.events[1].id],
+        review: "supported",
+      },
+    ];
+    const body = {
+      title: "test",
+      blocks,
+      lexical: article.lexical,
+      expectedVersion: article.version,
+    };
+    article = await api.saveArticle(a, article.id, body);
+    expect(article.blocks[0].review).toBe("needs_review");
+    await expect(api.saveArticle(a, article.id, body)).rejects.toMatchObject({
+      status: 409,
+    });
+    const reviewed = await api.saveArticle(
+      a,
+      article.id,
+      {
+        ...body,
+        blocks: [{ ...blocks[0], review: "supported" }],
+        expectedVersion: article.version,
+      },
+      true,
+    );
+    expect(reviewed.blocks[0].review).toBe("supported");
+    const edited = await api.saveArticle(a, article.id, {
+      ...body,
+      blocks: [{ ...blocks[0], text: "changed", review: "supported" }],
+      expectedVersion: reviewed.version,
+    });
+    expect(edited.blocks[0].review).toBe("needs_review");
+    expect((await api.revisions(a, article.id)).length).toBe(4);
+  });
+  it("rejects stale AI suggestions without replacing current text", async () => {
+    const { session } = await api.sample(a);
+    const article = await api.createArticle(a, { sessionId: session.id });
+    const suggestion = {
+      id: randomUUID(),
+      ownerId: a.id,
+      articleId: article.id,
+      blockId: "block",
+      baseVersion: 1,
+      status: "pending",
+      block: {
+        id: "block",
+        type: "paragraph",
+        text: "AI text",
+        evidenceIds: [],
+        review: "needs_review",
+      },
+    };
+    await put(api.db, "suggestions", suggestion, article.id);
+    await api.saveArticle(a, article.id, {
+      title: "user text",
+      blocks: [],
+      lexical: article.lexical,
+      expectedVersion: 1,
+    });
+    await expect(
+      api.resolveSuggestion(a, suggestion.id, {
+        action: "accept",
+        expectedVersion: 2,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await api.owned("articles", article.id, a)).title).toBe(
+      "user text",
+    );
+  });
+  it("limits automatic revisions to fifty while retaining permanent versions", async () => {
+    const { session } = await api.sample(a);
+    let article: any = await api.createArticle(a, { sessionId: session.id });
+    for (let i = 0; i < 53; i++)
+      article = await api.saveArticle(a, article.id, {
+        title: "version " + i,
+        blocks: [],
+        lexical: article.lexical,
+        expectedVersion: article.version,
+        kind: "auto",
+      });
+    const revisions = await api.revisions(a, article.id);
+    expect(revisions.filter((x) => x.kind === "auto")).toHaveLength(50);
+    expect(revisions.filter((x) => x.kind === "manual")).toHaveLength(1);
+  }, 15000);
 });
-describe('quotas, images and deletion',()=>{
- it('quota blocks AI but permits recording and editing',async()=>{const capped=await api.userByEmail('capped@local.test');await api.setLimits(admin,capped.id,{dailyLimit:0});const fresh=await one(api.db,'users',capped.id);const jobs=new JobService(api);await expect(jobs.budget(fresh)).rejects.toMatchObject({status:429});expect(await api.createProject(fresh,{name:'still works'})).toHaveProperty('id');});
- it('image access is owner checked or scoped signed, and tampering is rejected',async()=>{const result=await api.upload(a,{buffer:Buffer.from([137,80,78,71,13,10,26,10]),size:8,mimetype:'image/png'});await expect(api.readUpload(b,result.id)).rejects.toMatchObject({status:404});const u=new URL(result.url,'http://localhost');expect((await api.readSignedUpload(result.id,Object.fromEntries(u.searchParams))).buffer).toHaveLength(8);await expect(api.readSignedUpload(result.id,{expires:u.searchParams.get('expires'),signature:'wrong'})).rejects.toMatchObject({status:401});});
- it('deletes original and derived session data while explicitly retaining remote Ghost posts',async()=>{const {project,session}=await api.sample(b);const article=await api.createArticle(b,{sessionId:session.id});await put(api.db,'summaries',{id:randomUUID(),ownerId:b.id,text:'summary'},session.id);expect(await api.deleteProject(b,project.id)).toMatchObject({deleted:true,ghostPostsRetained:true});await expect(api.session(b,session.id)).rejects.toMatchObject({status:404});await expect(api.owned('articles',article.id,b)).rejects.toMatchObject({status:404});expect(await list(api.db,'summaries',b.id,session.id)).toHaveLength(0);});
+describe("quotas, images and deletion", () => {
+  it("quota blocks AI but permits recording and editing", async () => {
+    const capped = await api.userByEmail("capped@local.test");
+    await api.setLimits(admin, capped.id, { dailyLimit: 0 });
+    const fresh = await one(api.db, "users", capped.id);
+    const jobs = new JobService(api);
+    await expect(jobs.budget(fresh)).rejects.toMatchObject({ status: 429 });
+    expect(
+      await api.createProject(fresh, { name: "still works" }),
+    ).toHaveProperty("id");
+  });
+  it("image access is owner checked or scoped signed, and tampering is rejected", async () => {
+    const result = await api.upload(a, {
+      buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      size: 8,
+      mimetype: "image/png",
+    });
+    await expect(api.readUpload(b, result.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    const u = new URL(result.url, "http://localhost");
+    expect(
+      (
+        await api.readSignedUpload(
+          result.id,
+          Object.fromEntries(u.searchParams),
+        )
+      ).buffer,
+    ).toHaveLength(8);
+    await expect(
+      api.readSignedUpload(result.id, {
+        expires: u.searchParams.get("expires"),
+        signature: "wrong",
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+  it("deletes original and derived session data while explicitly retaining remote Ghost posts", async () => {
+    const { project, session } = await api.sample(b);
+    const article = await api.createArticle(b, { sessionId: session.id });
+    await put(
+      api.db,
+      "summaries",
+      { id: randomUUID(), ownerId: b.id, text: "summary" },
+      session.id,
+    );
+    expect(await api.deleteProject(b, project.id)).toMatchObject({
+      deleted: true,
+      ghostPostsRetained: true,
+    });
+    await expect(api.session(b, session.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(api.owned("articles", article.id, b)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await list(api.db, "summaries", b.id, session.id)).toHaveLength(0);
+  });
 });
-describe('deletion and retention privacy boundaries',()=>{
- it('removes model payloads and queued copies when a session is deleted',async()=>{const {session}=await api.sample(a);const job={id:randomUUID(),ownerId:a.id,sessionId:session.id,status:'queued',input:{sessionId:session.id,events:[{data:{content:'private source'}}]}};await put(api.db,'jobs',job);const run={id:randomUUID(),ownerId:a.id,jobId:job.id,sessionId:session.id,input:'private source',output:'private summary',cost:0.01};await put(api.db,'model_runs',run);await api.deleteSession(a,session.id);expect(await one(api.db,'jobs',job.id)).toBeUndefined();expect(await one(api.db,'model_runs',run.id)).toMatchObject({cost:0.01,contentDeleted:true});expect(await one(api.db,'model_runs',run.id)).not.toHaveProperty('input');expect(await one(api.db,'model_runs',run.id)).not.toHaveProperty('output');});
- it('expires evidence from current and historical revisions and clears stored AI input',async()=>{const p=await api.createProject(a,{name:'retention'}),s=await api.createSession(a,p.id,{}),eventId=randomUUID();await api.ingest(a,s.id,{events:[{id:eventId,sessionId:s.id,sequence:1,type:'memo',occurredAt:'2020-01-01T00:00:00.000Z',data:{text:'expired raw note'}}]});let article:any=await api.createArticle(a,{sessionId:s.id});article=await api.saveArticle(a,article.id,{expectedVersion:article.version,title:'Keep article',lexical:article.lexical,blocks:[{id:'b',type:'paragraph',text:'Article retained',evidenceIds:[eventId],review:'supported'}]},true);await api.retention(admin);const current=await api.owned('articles',article.id,a);expect(current.blocks[0]).toMatchObject({review:'needs_review',evidenceIds:[]});expect((await api.revisions(a,article.id)).find(x=>x.version===2).article.blocks[0].evidenceIds).toEqual([]);expect((await api.session(a,s.id)).events).toHaveLength(0);});
- it('identically redacted snapshots can be retransmitted with generated file IDs',async()=>{const p=await api.createProject(a,{name:'redacted retry'}),s=await api.createSession(a,p.id,{});const ev={id:randomUUID(),sessionId:s.id,sequence:1,type:'snapshot',filePath:'code.py',occurredAt:new Date().toISOString(),data:{content:'key="sk-or-v1-'+'b'.repeat(40)+'"',hash:'pre-redaction'}};await api.ingest(a,s.id,{events:[ev]});expect(await api.ingest(a,s.id,{events:[ev]})).toMatchObject({ackThrough:1});expect((await api.session(a,s.id)).events).toHaveLength(1);});
+describe("deletion and retention privacy boundaries", () => {
+  it("removes model payloads and queued copies when a session is deleted", async () => {
+    const { session } = await api.sample(a);
+    const job = {
+      id: randomUUID(),
+      ownerId: a.id,
+      sessionId: session.id,
+      status: "queued",
+      input: {
+        sessionId: session.id,
+        events: [{ data: { content: "private source" } }],
+      },
+    };
+    await put(api.db, "jobs", job);
+    const run = {
+      id: randomUUID(),
+      ownerId: a.id,
+      jobId: job.id,
+      sessionId: session.id,
+      input: "private source",
+      output: "private summary",
+      cost: 0.01,
+    };
+    await put(api.db, "model_runs", run);
+    await api.deleteSession(a, session.id);
+    expect(await one(api.db, "jobs", job.id)).toBeUndefined();
+    expect(await one(api.db, "model_runs", run.id)).toMatchObject({
+      cost: 0.01,
+      contentDeleted: true,
+    });
+    expect(await one(api.db, "model_runs", run.id)).not.toHaveProperty("input");
+    expect(await one(api.db, "model_runs", run.id)).not.toHaveProperty(
+      "output",
+    );
+  });
+  it("expires evidence from current and historical revisions and clears stored AI input", async () => {
+    const p = await api.createProject(a, { name: "retention" }),
+      s = await api.createSession(a, p.id, {}),
+      eventId = randomUUID();
+    await api.ingest(a, s.id, {
+      events: [
+        {
+          id: eventId,
+          sessionId: s.id,
+          sequence: 1,
+          type: "memo",
+          occurredAt: "2020-01-01T00:00:00.000Z",
+          data: { text: "expired raw note" },
+        },
+      ],
+    });
+    let article: any = await api.createArticle(a, { sessionId: s.id });
+    article = await api.saveArticle(
+      a,
+      article.id,
+      {
+        expectedVersion: article.version,
+        title: "Keep article",
+        lexical: article.lexical,
+        blocks: [
+          {
+            id: "b",
+            type: "paragraph",
+            text: "Article retained",
+            evidenceIds: [eventId],
+            review: "supported",
+          },
+        ],
+      },
+      true,
+    );
+    await api.retention(admin);
+    const current = await api.owned("articles", article.id, a);
+    expect(current.blocks[0]).toMatchObject({
+      review: "needs_review",
+      evidenceIds: [],
+    });
+    expect(
+      (await api.revisions(a, article.id)).find((x) => x.version === 2).article
+        .blocks[0].evidenceIds,
+    ).toEqual([]);
+    expect((await api.session(a, s.id)).events).toHaveLength(0);
+  });
+  it("identically redacted snapshots can be retransmitted with generated file IDs", async () => {
+    const p = await api.createProject(a, { name: "redacted retry" }),
+      s = await api.createSession(a, p.id, {});
+    const ev = {
+      id: randomUUID(),
+      sessionId: s.id,
+      sequence: 1,
+      type: "snapshot",
+      filePath: "code.py",
+      occurredAt: new Date().toISOString(),
+      data: {
+        content: 'key="sk-or-v1-' + "b".repeat(40) + '"',
+        hash: "pre-redaction",
+      },
+    };
+    await api.ingest(a, s.id, { events: [ev] });
+    expect(await api.ingest(a, s.id, { events: [ev] })).toMatchObject({
+      ackThrough: 1,
+    });
+    expect((await api.session(a, s.id)).events).toHaveLength(1);
+  });
 });
 
-describe('rich editor and collector compatibility',()=>{
- it('preserves untouched rich text when accepting a block suggestion',()=>{const blocks:any[]=[{id:'a',type:'paragraph',text:'bold',evidenceIds:[],review:'needs_review'},{id:'b',type:'paragraph',text:'old',evidenceIds:[],review:'needs_review'}];const untouched={type:'paragraph',attrs:{id:'a'},content:[{type:'text',text:'bold',marks:[{type:'bold'}]}]};const lexical={autobloggerEditor:{type:'doc',content:[untouched,{type:'paragraph',attrs:{id:'b'},content:[{type:'text',text:'old'}]}]}};const updated=replaceEditorBlock(lexical,blocks,{...blocks[1],text:'new'});expect(updated.autobloggerEditor.content![0]).toEqual(untouched);expect(updated.root.children[0].html).toContain('<strong>bold</strong>');expect(updated.root.children[0].html).toContain('new');expect(updated.root.children[0].html).not.toContain('<p>old</p>');});
- it('uses path glob rules rather than substring matching',()=>{expect(matchesGlob('nested/node_modules/main.py','**/node_modules/**')).toBe(true);expect(matchesGlob('node_modules/main.py','**/node_modules/**')).toBe(true);expect(matchesGlob('src/main.cpp','*.py')).toBe(false);expect(matchesGlob('src/main.py','*.py')).toBe(true);expect(matchesGlob('src/excluded.py','src/*')).toBe(true);expect(matchesGlob('src/sub/main.py','src/*')).toBe(false);});
- it('preview preserves HTML marks and strips scripts',async()=>{const {session}=await api.sample(a);const article=await api.createArticle(a,{sessionId:session.id});await api.saveArticle(a,article.id,{expectedVersion:1,title:'rich',blocks:[],lexical:{root:{type:'root',version:1,children:[{type:'html',version:1,html:'<p><strong>bold</strong><em>italic</em><script>alert(1)</script></p>'}]}}});const preview=await api.preview(a,article.id);expect(preview.html).toContain('<strong>bold</strong>');expect(preview.html).toContain('<em>italic</em>');expect(preview.html).not.toContain('script');});
+describe("rich editor and collector compatibility", () => {
+  it("preserves untouched rich text when accepting a block suggestion", () => {
+    const blocks: any[] = [
+      {
+        id: "a",
+        type: "paragraph",
+        text: "bold",
+        evidenceIds: [],
+        review: "needs_review",
+      },
+      {
+        id: "b",
+        type: "paragraph",
+        text: "old",
+        evidenceIds: [],
+        review: "needs_review",
+      },
+    ];
+    const untouched = {
+      type: "paragraph",
+      attrs: { id: "a" },
+      content: [{ type: "text", text: "bold", marks: [{ type: "bold" }] }],
+    };
+    const lexical = {
+      autobloggerEditor: {
+        type: "doc",
+        content: [
+          untouched,
+          {
+            type: "paragraph",
+            attrs: { id: "b" },
+            content: [{ type: "text", text: "old" }],
+          },
+        ],
+      },
+    };
+    const updated = replaceEditorBlock(lexical, blocks, {
+      ...blocks[1],
+      text: "new",
+    });
+    expect(updated.autobloggerEditor.content![0]).toEqual(untouched);
+    expect(updated.root.children[0].html).toContain("<strong>bold</strong>");
+    expect(updated.root.children[0].html).toContain("new");
+    expect(updated.root.children[0].html).not.toContain("<p>old</p>");
+  });
+  it("uses path glob rules rather than substring matching", () => {
+    expect(
+      matchesGlob("nested/node_modules/main.py", "**/node_modules/**"),
+    ).toBe(true);
+    expect(matchesGlob("node_modules/main.py", "**/node_modules/**")).toBe(
+      true,
+    );
+    expect(matchesGlob("src/main.cpp", "*.py")).toBe(false);
+    expect(matchesGlob("src/main.py", "*.py")).toBe(true);
+    expect(matchesGlob("src/excluded.py", "src/*")).toBe(true);
+    expect(matchesGlob("src/sub/main.py", "src/*")).toBe(false);
+  });
+  it("preview preserves HTML marks and strips scripts", async () => {
+    const { session } = await api.sample(a);
+    const article = await api.createArticle(a, { sessionId: session.id });
+    await api.saveArticle(a, article.id, {
+      expectedVersion: 1,
+      title: "rich",
+      blocks: [],
+      lexical: {
+        root: {
+          type: "root",
+          version: 1,
+          children: [
+            {
+              type: "html",
+              version: 1,
+              html: "<p><strong>bold</strong><em>italic</em><script>alert(1)</script></p>",
+            },
+          ],
+        },
+      },
+    });
+    const preview = await api.preview(a, article.id);
+    expect(preview.html).toContain("<strong>bold</strong>");
+    expect(preview.html).toContain("<em>italic</em>");
+    expect(preview.html).not.toContain("script");
+  });
 });
 
-describe('background review is metadata, not an editor overwrite',()=>{
- it('keeps content version stable and never verifies a newer user edit',async()=>{const {session}=await api.sample(a);const evidence=(await api.session(a,session.id)).events[0].id;let article:any=await api.createArticle(a,{sessionId:session.id});article=await api.saveArticle(a,article.id,{expectedVersion:1,title:'review',blocks:[{id:'r',type:'paragraph',text:'original',evidenceIds:[evidence],review:'needs_review'}],lexical:article.lexical});const originalVersion=article.version;const verified=[{...article.blocks[0],review:'supported'}];expect(await api.updateReviews(a,article.id,article.version,verified)).toMatchObject({stale:false,version:originalVersion});expect((await api.owned('articles',article.id,a)).version).toBe(originalVersion);const changed=await api.saveArticle(a,article.id,{expectedVersion:originalVersion,title:'review',blocks:[{...article.blocks[0],text:'edited'}],lexical:article.lexical});expect(await api.updateReviews(a,article.id,originalVersion,verified)).toMatchObject({stale:true});const current=await api.owned('articles',article.id,a);expect(current.blocks[0]).toMatchObject({text:'edited',review:'needs_review'});expect(current.version).toBe(changed.version);});
+describe("background review is metadata, not an editor overwrite", () => {
+  it("keeps content version stable and never verifies a newer user edit", async () => {
+    const { session } = await api.sample(a);
+    const evidence = (await api.session(a, session.id)).events[0].id;
+    let article: any = await api.createArticle(a, { sessionId: session.id });
+    article = await api.saveArticle(a, article.id, {
+      expectedVersion: 1,
+      title: "review",
+      blocks: [
+        {
+          id: "r",
+          type: "paragraph",
+          text: "original",
+          evidenceIds: [evidence],
+          review: "needs_review",
+        },
+      ],
+      lexical: article.lexical,
+    });
+    const originalVersion = article.version;
+    const verified = [{ ...article.blocks[0], review: "supported" }];
+    expect(
+      await api.updateReviews(a, article.id, article.version, verified),
+    ).toMatchObject({ stale: false, version: originalVersion });
+    expect((await api.owned("articles", article.id, a)).version).toBe(
+      originalVersion,
+    );
+    const changed = await api.saveArticle(a, article.id, {
+      expectedVersion: originalVersion,
+      title: "review",
+      blocks: [{ ...article.blocks[0], text: "edited" }],
+      lexical: article.lexical,
+    });
+    expect(
+      await api.updateReviews(a, article.id, originalVersion, verified),
+    ).toMatchObject({ stale: true });
+    const current = await api.owned("articles", article.id, a);
+    expect(current.blocks[0]).toMatchObject({
+      text: "edited",
+      review: "needs_review",
+    });
+    expect(current.version).toBe(changed.version);
+  });
 });
 
-describe('completion, assets and signup policy',()=>{
- it('records completion once, independently of publication, and clears on content edits',async()=>{const {session}=await api.sample(a);const article=await api.createArticle(a,{sessionId:session.id});const first=await api.completeArticle(a,article.id,{expectedVersion:1});const second=await api.completeArticle(a,article.id,{expectedVersion:1});expect(first.editingCompletedAt).toBeTruthy();expect(second.editingCompletedAt).toBe(first.editingCompletedAt);expect(first.status).toBe('local');expect((await list(api.db,'metrics',a.id,article.id))).toHaveLength(1);const saved=await api.saveArticle(a,article.id,{expectedVersion:1,title:'new content',blocks:[],lexical:article.lexical});expect(saved.editingCompletedAt).toBeNull();await expect(api.completeArticle(a,article.id,{expectedVersion:1})).rejects.toMatchObject({status:409});});
- it('deletes images after their last article reference is removed',async()=>{const uploaded=await api.upload(a,{buffer:Buffer.from([137,80,78,71,13,10,26,10]),size:8,mimetype:'image/png'});const {session}=await api.sample(a);const articles=[];for(let i=0;i<2;i++){const article=await api.createArticle(a,{sessionId:session.id});articles.push(await api.saveArticle(a,article.id,{expectedVersion:1,title:'image',blocks:[{id:'image',type:'image',text:'image',url:uploaded.url,evidenceIds:[],review:'needs_review'}],lexical:{root:{type:'root',version:1,children:[{type:'html',version:1,html:`<img src="${uploaded.url}">`}]}}}));}await api.deleteArticle(a,articles[0].id);expect((await api.readUpload(a,uploaded.id)).buffer).toHaveLength(8);await api.deleteArticle(a,articles[1].id);await expect(api.readUpload(a,uploaded.id)).rejects.toMatchObject({status:404});});
- it('pauses new registrations into a waitlist while retaining existing login',async()=>{vi.stubEnv('SIGNUP_CREDIT_CHECK','false');try{await api.updateSettings(admin,{signupPaused:true});await expect(api.localAuth('waiting@local.test')).rejects.toMatchObject({status:503});expect((await list(api.db,'settings')).some(x=>x.email==='waiting@local.test')).toBe(true);expect(await api.localAuth(a.email)).toHaveProperty('token');}finally{await api.updateSettings(admin,{signupPaused:false});vi.unstubAllEnvs();}});
+describe("completion, assets and signup policy", () => {
+  it("records completion once, independently of publication, and clears on content edits", async () => {
+    const { session } = await api.sample(a);
+    const article = await api.createArticle(a, { sessionId: session.id });
+    const first = await api.completeArticle(a, article.id, {
+      expectedVersion: 1,
+    });
+    const second = await api.completeArticle(a, article.id, {
+      expectedVersion: 1,
+    });
+    expect(first.editingCompletedAt).toBeTruthy();
+    expect(second.editingCompletedAt).toBe(first.editingCompletedAt);
+    expect(first.status).toBe("local");
+    expect(await list(api.db, "metrics", a.id, article.id)).toHaveLength(1);
+    const saved = await api.saveArticle(a, article.id, {
+      expectedVersion: 1,
+      title: "new content",
+      blocks: [],
+      lexical: article.lexical,
+    });
+    expect(saved.editingCompletedAt).toBeNull();
+    await expect(
+      api.completeArticle(a, article.id, { expectedVersion: 1 }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it("deletes images after their last article reference is removed", async () => {
+    const uploaded = await api.upload(a, {
+      buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      size: 8,
+      mimetype: "image/png",
+    });
+    const { session } = await api.sample(a);
+    const articles = [];
+    for (let i = 0; i < 2; i++) {
+      const article = await api.createArticle(a, { sessionId: session.id });
+      articles.push(
+        await api.saveArticle(a, article.id, {
+          expectedVersion: 1,
+          title: "image",
+          blocks: [
+            {
+              id: "image",
+              type: "image",
+              text: "image",
+              url: uploaded.url,
+              evidenceIds: [],
+              review: "needs_review",
+            },
+          ],
+          lexical: {
+            root: {
+              type: "root",
+              version: 1,
+              children: [
+                {
+                  type: "html",
+                  version: 1,
+                  html: `<img src="${uploaded.url}">`,
+                },
+              ],
+            },
+          },
+        }),
+      );
+    }
+    await api.deleteArticle(a, articles[0].id);
+    expect((await api.readUpload(a, uploaded.id)).buffer).toHaveLength(8);
+    await api.deleteArticle(a, articles[1].id);
+    await expect(api.readUpload(a, uploaded.id)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+  it("pauses new registrations into a waitlist while retaining existing login", async () => {
+    vi.stubEnv("SIGNUP_CREDIT_CHECK", "false");
+    try {
+      await api.updateSettings(admin, { signupPaused: true });
+      await expect(api.localAuth("waiting@local.test")).rejects.toMatchObject({
+        status: 503,
+      });
+      expect(
+        (await list(api.db, "settings")).some(
+          (x) => x.email === "waiting@local.test",
+        ),
+      ).toBe(true);
+      expect(await api.localAuth(a.email)).toHaveProperty("token");
+    } finally {
+      await api.updateSettings(admin, { signupPaused: false });
+      vi.unstubAllEnvs();
+    }
+  });
 });

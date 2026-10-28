@@ -1,4 +1,10 @@
-export type EventType = 'snapshot' | 'edit' | 'run' | 'memo' | 'session_start' | 'session_stop';
+export type EventType =
+  | "snapshot"
+  | "edit"
+  | "run"
+  | "memo"
+  | "session_start"
+  | "session_stop";
 export interface RecordEvent {
   id: string;
   sessionId: string;
@@ -26,4 +32,8 @@ export interface SessionManifest {
   serverCreated?: boolean;
   serverEnded?: boolean;
 }
-export interface SyncAck { ackThrough: number; received: number[]; gaps: number[]; }
+export interface SyncAck {
+  ackThrough: number;
+  received: number[];
+  gaps: number[];
+}

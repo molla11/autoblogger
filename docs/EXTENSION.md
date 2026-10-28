@@ -23,7 +23,7 @@
 - 확장 host가 실행 도중 종료되면 pending-runs.json에서 복구하고 종료 상태를 unknown으로 기록한다. 완료 이벤트의 executionId로 중복 복구를 막는다.
 - sync.test.ts: HTTP 응답 유실 후 동일 ID 재전송·멱등 확인, 로컬 저널 재시작 후 동기화 복원
 - 2026-10-29: 단위/통합 성격의 Node 테스트 18개 통과, TypeScript 검사 통과, VSIX 빌드 성공.
-- VS Code 실제 extension host의 shell integration 및 WSL 토큰 저장은 별도 실기기 검증 필요. 순수 Node 테스트가 이를 대체하지 않는다.
+- VS Code 실제 extension host의 shell integration은 아래 별도 headless 테스트로 검증했다. Windows 클라이언트 → Remote WSL host의 URI/SecretStorage 통합은 별도 검증 범위이며 Linux host 테스트로 대체했다고 표시하지 않는다.
 
 ## 구현상 제한
 - shell 변수 확장, command substitution, 파이프, 세미콜론, 다중 소스 컴파일, `-c/-E/-S`, `python -m/-c`는 추정 연결하지 않는다.
@@ -41,3 +41,23 @@
 - 기록 대상 폴더의 `.vscode` 항목 이름까지 확인했으나 실행·디버깅 설정 파일 이름만 있었다. 그 설정 내용이나 기존 확장 구현·프롬프트·생성 글·대화 기록은 읽지 않았다.
 - 탐색을 넓히지 않고 mock 데이터로 전환했다. `pnpm exec tsx apps/extension/scripts/create-mock-sessions.ts`가 C++/Python 실패→수정→종료 fixture를 현재 Recorder로 생성한다.
 - 결과는 gitignored `.data/imported/mock-cpp.json`, `mock-python.json`, `provenance.json`에 있다. source=mock, simulated=true, officialEvaluation=false를 표시한다. 기록 구조·버전 연결·파이프라인 테스트용이며 실제 파일럿/정식 평가가 아니다.
+
+## 실제 VS Code extension host 검증
+
+2026-10-29, VS Code 1.144.0 Linux x64를 별도로 내려받아 WSL2 Linux 안의 Xvfb에서 실행했다. 사용자 VS Code 설정·확장·워크스페이스는 변경하지 않았다. 각 테스트는 임시 user-data-dir, extensions-dir, 합성 C++/Python 작업 폴더를 사용한다.
+
+재현: Ubuntu 계열 Linux에서 `bash tests/vscode-host/run-linux.sh`. sudo 없이 apt 패키지를 `/tmp/autoblogger-vscode-tools`에 다운로드·추출하고 Xvfb를 실행한다. 기본 GTK/NSS/GBM/audio 라이브러리, cc, g++, Python3, npm이 필요하다. Xvfb에 내장된 xkbcomp 경로는 해당 임시 프로세스에서만 재지정한다. 실행이 끝나면 스크립트가 자신의 Xvfb 프로세스를 종료한다.
+
+두 번의 실제 VS Code 프로세스 실행에서 다음을 통과했다.
+
+- 개발 확장 활성화, 초기 C++/Python 스냅샷
+- 실제 Python 프로세스 출력과 리다이렉션 입력 수집
+- C++ 컴파일 후 파일을 바꾸어도 기존 실행파일이 기존 컴파일 스냅샷에 연결됨
+- `g++ ... && ./...`의 새 디스크 버전 연결 및 실제 컴파일 에러 분류
+- 명시적 중지 저장
+- 기록 중인 세션을 남기고 VS Code 프로세스를 완전히 종료·재시작한 뒤 세션·이벤트 복구
+- 재시작 후 새 편집·저장·Python 실행 연결, 로컬 순번 연속성과 이벤트 ID 유일성
+
+테스트 하네스가 terminal.shellIntegration.executeCommand를 호출해 사용자의 직접 실행을 시뮬레이션한다. 기록 확장 자체는 실행 API를 호출하지 않는다. 터미널의 shell integration 객체와 cwd가 모두 준비된 뒤 실행해야 처음 명령의 작업 폴더를 확인할 수 있어 하네스가 이를 기다린다.
+
+마지막 성공 아티팩트 경로는 `/tmp/autoblogger-vscode-tools/latest-artifacts.txt`, 각 실행의 체크 목록은 해당 폴더의 results-first.json/results-restart.json이다. Linux host 실검증이며, 사람의 문제 풀이 파일럿이나 Remote WSL의 Windows URI 전달·자격 증명 저장 검증을 뜻하지 않는다.

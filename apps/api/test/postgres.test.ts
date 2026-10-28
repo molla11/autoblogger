@@ -1,19 +1,128 @@
-import {beforeAll,afterAll,describe,it,expect,vi} from 'vitest';
-import {Pool} from 'pg';
-import {randomUUID,createHash} from 'node:crypto';
-import {ApiService,User} from '../src/service';
-import {JobService} from '../src/jobs';
-const url=process.env.API_TEST_DATABASE_URL;
-describe.skipIf(!url)('real PostgreSQL concurrency',()=>{
- let api:ApiService,user:User,pool:Pool,dbName='autoblogger_test_'+randomUUID().replaceAll('-','');
- beforeAll(async()=>{pool=new Pool({connectionString:url});await pool.query(`CREATE DATABASE ${dbName}`);const target=new URL(url!);target.pathname='/'+dbName;api=await new ApiService().init(target.href);user=await api.userByEmail('postgres@local.test');},30000);
- afterAll(async()=>{await api?.close();await pool?.query(`DROP DATABASE IF EXISTS ${dbName}`);await pool?.end();});
- it('only one concurrent save with the same expected version succeeds',async()=>{const {session}=await api.sample(user);const article=await api.createArticle(user,{sessionId:session.id});const body={title:'race',lexical:article.lexical,blocks:[],expectedVersion:1};const outcomes=await Promise.allSettled([api.saveArticle(user,article.id,body),api.saveArticle(user,article.id,{...body,title:'other'})]);expect(outcomes.filter(x=>x.status==='fulfilled')).toHaveLength(1);expect(outcomes.filter(x=>x.status==='rejected')).toHaveLength(1);expect((await api.owned('articles',article.id,user)).version).toBe(2);});
- it('a pairing code can only be exchanged once concurrently',async()=>{const verifier='x'.repeat(43),challenge=createHash('sha256').update(verifier).digest('base64url');const {code}=await api.pair(user,{challenge,name:'race'});const results=await Promise.allSettled([api.exchange({code,verifier}),api.exchange({code,verifier})]);expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);});
- it('concurrent registrations admit only one AI job per user',async()=>{const {session}=await api.sample(user);const jobs=new JobService(api);vi.spyOn(jobs,'enqueue').mockResolvedValue(undefined);const results=await Promise.allSettled([jobs.create(user,{kind:'generate',sessionId:session.id}),jobs.create(user,{kind:'generate',sessionId:session.id})]);expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);expect(results.filter(x=>x.status==='rejected')).toHaveLength(1);});
- it('does not overwrite another owner when client-supplied session IDs race',async()=>{const other=await api.userByEmail('other@local.test');const p1=await api.createProject(user,{name:'one'}),p2=await api.createProject(other,{name:'two'}),sessionId=randomUUID();const results=await Promise.allSettled([api.createSession(user,p1.id,{id:sessionId}),api.createSession(other,p2.id,{id:sessionId})]);expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);const rows=await api.db.query('SELECT owner_id,data FROM sessions WHERE id=$1',[sessionId]);expect(rows.rows[0].owner_id).toBe(rows.rows[0].data.ownerId);});
- it('does not replace another owner file under concurrent ingestion',async()=>{const other=await api.userByEmail('file-other@local.test');const p1=await api.createProject(user,{name:'one'}),p2=await api.createProject(other,{name:'two'});const s1=await api.createSession(user,p1.id,{}),s2=await api.createSession(other,p2.id,{}),fileId=randomUUID();const ev=(sessionId:string)=>({id:randomUUID(),sessionId,sequence:1,type:'snapshot',fileId,filePath:'main.py',occurredAt:new Date().toISOString(),data:{content:'print(1)',hash:'will-normalize'}});const results=await Promise.allSettled([api.ingest(user,s1.id,{events:[ev(s1.id)]}),api.ingest(other,s2.id,{events:[ev(s2.id)]})]);expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);const rows=await api.db.query('SELECT owner_id,data FROM files WHERE id=$1',[fileId]);expect(rows.rows[0].owner_id).toBe(rows.rows[0].data.ownerId);});
+import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
+import { Pool } from "pg";
+import { randomUUID, createHash } from "node:crypto";
+import { ApiService, User } from "../src/service";
+import { JobService } from "../src/jobs";
+const url = process.env.API_TEST_DATABASE_URL;
+describe.skipIf(!url)("real PostgreSQL concurrency", () => {
+  let api: ApiService,
+    user: User,
+    pool: Pool,
+    dbName = "autoblogger_test_" + randomUUID().replaceAll("-", "");
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: url });
+    await pool.query(`CREATE DATABASE ${dbName}`);
+    const target = new URL(url!);
+    target.pathname = "/" + dbName;
+    api = await new ApiService().init(target.href);
+    user = await api.userByEmail("postgres@local.test");
+  }, 30000);
+  afterAll(async () => {
+    await api?.close();
+    await pool?.query(`DROP DATABASE IF EXISTS ${dbName}`);
+    await pool?.end();
+  });
+  it("only one concurrent save with the same expected version succeeds", async () => {
+    const { session } = await api.sample(user);
+    const article = await api.createArticle(user, { sessionId: session.id });
+    const body = {
+      title: "race",
+      lexical: article.lexical,
+      blocks: [],
+      expectedVersion: 1,
+    };
+    const outcomes = await Promise.allSettled([
+      api.saveArticle(user, article.id, body),
+      api.saveArticle(user, article.id, { ...body, title: "other" }),
+    ]);
+    expect(outcomes.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((x) => x.status === "rejected")).toHaveLength(1);
+    expect((await api.owned("articles", article.id, user)).version).toBe(2);
+  });
+  it("a pairing code can only be exchanged once concurrently", async () => {
+    const verifier = "x".repeat(43),
+      challenge = createHash("sha256").update(verifier).digest("base64url");
+    const { code } = await api.pair(user, { challenge, name: "race" });
+    const results = await Promise.allSettled([
+      api.exchange({ code, verifier }),
+      api.exchange({ code, verifier }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+  });
+  it("concurrent registrations admit only one AI job per user", async () => {
+    const { session } = await api.sample(user);
+    const jobs = new JobService(api);
+    vi.spyOn(jobs, "enqueue").mockResolvedValue(undefined);
+    const results = await Promise.allSettled([
+      jobs.create(user, { kind: "generate", sessionId: session.id }),
+      jobs.create(user, { kind: "generate", sessionId: session.id }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((x) => x.status === "rejected")).toHaveLength(1);
+  });
+  it("does not overwrite another owner when client-supplied session IDs race", async () => {
+    const other = await api.userByEmail("other@local.test");
+    const p1 = await api.createProject(user, { name: "one" }),
+      p2 = await api.createProject(other, { name: "two" }),
+      sessionId = randomUUID();
+    const results = await Promise.allSettled([
+      api.createSession(user, p1.id, { id: sessionId }),
+      api.createSession(other, p2.id, { id: sessionId }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    const rows = await api.db.query(
+      "SELECT owner_id,data FROM sessions WHERE id=$1",
+      [sessionId],
+    );
+    expect(rows.rows[0].owner_id).toBe(rows.rows[0].data.ownerId);
+  });
+  it("does not replace another owner file under concurrent ingestion", async () => {
+    const other = await api.userByEmail("file-other@local.test");
+    const p1 = await api.createProject(user, { name: "one" }),
+      p2 = await api.createProject(other, { name: "two" });
+    const s1 = await api.createSession(user, p1.id, {}),
+      s2 = await api.createSession(other, p2.id, {}),
+      fileId = randomUUID();
+    const ev = (sessionId: string) => ({
+      id: randomUUID(),
+      sessionId,
+      sequence: 1,
+      type: "snapshot",
+      fileId,
+      filePath: "main.py",
+      occurredAt: new Date().toISOString(),
+      data: { content: "print(1)", hash: "will-normalize" },
+    });
+    const results = await Promise.allSettled([
+      api.ingest(user, s1.id, { events: [ev(s1.id)] }),
+      api.ingest(other, s2.id, { events: [ev(s2.id)] }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    const rows = await api.db.query(
+      "SELECT owner_id,data FROM files WHERE id=$1",
+      [fileId],
+    );
+    expect(rows.rows[0].owner_id).toBe(rows.rows[0].data.ownerId);
+  });
 
- it('admits only one concurrent publication for an article',async()=>{const other=await api.userByEmail('publisher@local.test');const {session}=await api.sample(other),article=await api.createArticle(other,{sessionId:session.id});const jobs=new JobService(api);vi.spyOn(jobs,'enqueue').mockResolvedValue(undefined);const results=await Promise.allSettled([jobs.create(other,{kind:'publish',articleId:article.id,targetStatus:'draft'}),jobs.create(other,{kind:'publish',articleId:article.id,targetStatus:'draft'})]);expect(results.filter(x=>x.status==='fulfilled')).toHaveLength(1);});
-
+  it("admits only one concurrent publication for an article", async () => {
+    const other = await api.userByEmail("publisher@local.test");
+    const { session } = await api.sample(other),
+      article = await api.createArticle(other, { sessionId: session.id });
+    const jobs = new JobService(api);
+    vi.spyOn(jobs, "enqueue").mockResolvedValue(undefined);
+    const results = await Promise.allSettled([
+      jobs.create(other, {
+        kind: "publish",
+        articleId: article.id,
+        targetStatus: "draft",
+      }),
+      jobs.create(other, {
+        kind: "publish",
+        articleId: article.id,
+        targetStatus: "draft",
+      }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+  });
 });
