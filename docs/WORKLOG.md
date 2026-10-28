@@ -1,36 +1,43 @@
 # 개발 재개 메모
 
+2026-10-29. 상세 결과와 배포 절차의 기준 문서는 `docs/message.txt`다.
+
 ## 사용자 지시
-- docs의 최신 명세 1~6주차 전체 구현. 기능 단위 commit/push. 실제 불가능한 항목과 배포 절차는 docs/message.txt.
-- 이번 작업은 로컬 서버 검증까지. 실서비스 로그인·배포는 지금 하지 않는다(2026-10-29 추가 지시).
-- OpenRouter는 openai/gpt-6.1-terra / Azure만. 자동 fallback 금지. 테스트 예산 $20. 관리자에서 이후 설정 변경 지원.
-- .env.local에 OpenRouter/Ghost 자격 증명이 있다. 출력·커밋 금지.
-- ps-blogself는 테스트 데이터 필요 시 코드 작성 기록만 확인. 기존 구현/프롬프트/생성 글을 읽지 않는다. 없으면 mock. 정식 평가로 간주하지 않는다.
-- 이메일 발송 없음. 기존 CMS webhook → shinem.dev 배포는 유지.
 
-## 구조와 분담
-- pnpm workspace: apps/web Next.js, apps/api NestJS, apps/extension VS Code, packages/shared, packages/ai.
-- root: 공유 계약, AI/Ghost 어댑터, 실행 환경, 통합 검증, 평가 도구·문서.
-- API 담당: 저장소·인증·소유권·동기화·작업·문서/발행/관리자 API.
-- Web 담당: 로그인·프로젝트·타임라인·Lexical·관리자·설정 웹.
-- Extension 담당: 로컬 기록·터미널 관찰·내구 큐·인증·동기화·VSIX.
-- Git commit/push는 root만 수행. 에이전트는 자기 담당 경로만 수정.
+- docs의 1~6주차 기능 구현, 기능 단위 commit/push. 실제 외부 의존과 사람 평가를 꾸며 완료하지 않는다.
+- 이번 범위는 로컬 테스트까지다. 사용자가 실서비스 로그인·배포를 이후로 미뤘다.
+- 초기 AI는 `openai/gpt-6.1-terra` / Azure만. 정확한 OpenRouter route는 `azure/eu`. 모든 호출에서 데이터 수집 거부·구조화 응답·fallback 금지. 이후 관리자 변경 지원.
+- 테스트 예산 $20. `.env.local`의 OpenRouter/Ghost 키를 출력하거나 커밋하지 않는다.
+- 이메일 발송 없음. 기존 CMS → webhook → shinem.dev를 변경하지 않는다.
+- ps-blogself는 코드 작성 기록만 최소 탐색했다. WSL20/Windows93 workspace storage에서 설정만 발견했고 기존 구현·프롬프트·글·대화는 읽지 않았다. 명시적 mock으로 검사했다.
 
-## 현재 사실
-- GitHub push 정상. 초기 문서 커밋 e6451fc, f7f4c38.
-- Docker 소켓 권한 불가. 기본 PGlite 로컬 모드 구현. /tmp/autoblogger-postgres에 Ubuntu 패키지를 추출해 실제 PostgreSQL16.15 포트55432, /tmp/autoblogger-redis Redis7 포트56379 실행 성공.
-- Supabase 정보 없음. 로컬 전용 인증으로 검증하고 운영용 Supabase JWT 검증 경로 구현.
-- Ghost6.67 read-only 사이트·글 조회 인증 성공. User-Agent 명시 필요. 기존 운영 글은 수정하지 않음.
-- OpenRouter 초기 $20 잔액 확인. 논리 provider Azure → 정확한 라우팅 slug azure/eu 필요(상위 azure는 regional surcharge 필터에서 제외). 데이터 수집 거부와 fallback 금지 유지. 소액 호출 성공 $0.000132.
-- 실제 Azure mock A/B/C6건 총 $0.0234042, C 첫 토큰 5569/4639ms. .data/evaluations/2026-10-28T18-45-49-483Z. 정식 평가·30분 세션 성능 아님.
-- ps-blogself WSL20+Windows93 workspace storage 제한 탐색: 설정만 발견, 기록 없음. 소스/프롬프트/생성 글 미열람. .data/imported mock exports cpp/python 각9 events 재생용. apps/extension/scripts/create-mock-sessions.ts.
-- 에디터 스파이크 Ghost lexical0.13.1 vs BlockIdExtension0.53 불가 → 명세상 Tiptap fallback. 실제 HTML 카드 JSON 사용, canonical blocks + autobloggerEditor document 저장.
-- 중간 검증:43 unit/integration 통과, PostgreSQL3 동시성 별도 통과, Playwright2 통과. 이후 테스트 추가 진행 중.
-- root 실행 API4000 session22137(코드 변경 후 재시작 필요), Next3000 session53933. API AUTO_SUMMARIES=false 테스트용. PostgreSQL/Redis는 daemon, 비밀키는 .env.local.
-- 현재 팀: api 보안/동시성/게시물 rich HTML 보존 최종 수정; web 추가 브라우저 conflict QA; extension /tmp에 실제 Ghost6.67 로컬 설치 테스트 중.
+## 현재 구현
 
-## 다음 작업
-- API 최신 restart하고 실제 PG+Redis 별도 worker 테스트. 생성→백그라운드 검토→제안→수락/거절→요약·취소·예산 거절 실제 흐름.
-- 모든 unit/typecheck/build 및 추가 browser 회귀. production Next build는 dev 종료 후.
-- 실제 로컬 Ghost 테스트 결과 수집. VSIX 최신 빌드·배포물 제공.
-- docs/message.txt 최종 결과·배포 절차 갱신. Git 작은 commit/push 유지.
+- pnpm workspace: Next 웹, Nest API, 별도 BullMQ/Redis worker, VS Code 확장, shared/AI packages.
+- 로컬 기본은 PGlite + 내부 큐 + 루프백 개발 인증. `pnpm dev`로 웹3000/API4000. 테스트 때 `AUTO_SUMMARIES=false`로 자동 유료 호출을 끌 수 있다.
+- 운영용 Supabase JWT/JWKS, PostgreSQL RLS, private Storage 및 Docker targets가 있다. 실제 운영 계정·배포는 제외했다.
+- source blobs는 `.data/source-blobs` 또는 Supabase private bucket. owner/session/content의 해시 경로. 삭제 실패 복구 사본, 기존 inline 호환, 내보내기·AI hydrate 구현.
+- 원본 변이는 전역 advisory lock으로 직렬화한다. 별도 lock pool과 프로세스 내부 mutex를 함께 사용해 일반 query pool 고갈을 막는다.
+- Tiptap 사용은 명세의 대체 조건에 따른 결정이다. Ghost Lexical0.13.1과 BlockIdExtension0.53 충돌 근거는 `EDITOR-SPIKE.md`. canonical blocks + 편집 문서 + Ghost HTML 카드 보존.
+- Ghost 키 암호화, DNS 고정/외부 URL 검증, 이미지 이관, 불변 버전 발행, 중복 방지, 초 단위 updated_at의 빈틈을 내용 fingerprint로 검사한다. Ghost 자체 read/write 사이 동시성 한계는 결과 문서에 명시했다.
+- 임시 네트워크 실패 때 로그인 토큰을 지우지 않는다. 실제401만 같은 토큰을 제거한다.
+
+## 실제 검증
+
+- 전체 단위/통합77, typecheck, build 통과. API36에는 실제 PostgreSQL7과 source blob7 포함.
+- 실제 Linux VS Code1.144 + Xvfb, WSL2 내부 두 host 프로세스12개 체크. Windows 클라이언트 RemoteWSL 왕복 검증과 구분한다.
+- 실제 Ghost6.67 + SQLite11개 체크, API→Redis→worker→Ghost 이미지·공개·충돌·공개 취소4개 체크. 운영 Ghost는 읽기 인증만 확인했다.
+- 새 source storage로 worker Azure 생성→검토→오래된 제안 거절→요약→상한 시 편집 유지 통과. 마지막 실행 초안9707ms/요약2037ms/$0.0315435.
+- mock A/B/C/C−검토8개, $0.0559506, 작은 입력 관측 p95 6182ms. 채점0/미채점8. 프롬프트 동결과 실제 파일럿 절차는 `EVALUATION.md`.
+- GitHub Actions는 unit/typecheck/build, production 웹 무료 브라우저 검사, Docker3targets 빌드, VSIX 업로드를 수행한다. 유료 모델은 CI에서 호출하지 않는다.
+- 마지막 브라우저/컨테이너/크레딧 수치는 `message.txt`를 확인한다.
+- 최종 production 웹 브라우저11개(실제 Azure 포함) 통과. 전체 테스트 크레딧 사용 $0.1915494, 잔여 $19.8084506. 검증용 서버는 모두 종료했고 .env.local과 .data는 보존했다.
+
+## 기록·운영
+
+- 원격: `https://github.com/molla11/autoblogger`, main. git 인증은 로컬 GitHub credential helper로 설정했고 push 정상.
+- 주요 구현 커밋: 965126a(shared), 6319112(AI/Ghost), 2a9ffca(extension), 68d59af(web), 116682b(API), f7c9d65(rich edit/concurrency), da7c0fe(auth), 43fb81b(source storage). 최종 문서 커밋은 git log 참조.
+- 임시 실제 PostgreSQL16.15/Redis7/Ghost6.67은 `/tmp/autoblogger-*`에 사용자 권한으로 설치했다. 재실행 방법은 `EXTENSION.md`/`GHOST-TEST.md`/테스트 스크립트 참조. 포트55432/56379/2369를 사용했다.
+- 원자료는 `.data/evaluations`, `.data/reports`, `.data/imported`, `.data/screenshots`에 있고 Git에 올리지 않는다. VSIX는 `apps/extension/dist/autoblogger-recorder.vsix` 및 CI artifact다.
+- `scripts/retention.ts`는 기본 읽기 집계, `--run` 때90일 정리. PGlite는 API 종료 후 사용하고 별도 운영 스케줄러는 PostgreSQL/동일 Storage 환경을 사용한다.
+- 사람의 파일럿·동의받은 베타·교차 평가·인터뷰, 실제 Windows 클라이언트 연결, 운영 Supabase/공개 사이트 배포는 후속 수동 작업이다. 개발 mock 검사로 대신 완료하지 않는다.

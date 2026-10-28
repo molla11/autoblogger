@@ -1,17 +1,184 @@
-Autoblogger 개발 결과 및 이어서 할 일
-현재 상태: 개발 진행 중. 완료 보고서가 아닙니다.
+Autoblogger 1~6주차 개발 결과 / 실행·배포 안내
+갱신: 2026-10-29 (Asia/Seoul)
+상태: 1~6주차 소프트웨어 기능 구현 및 로컬 검증 완료. 사람의 정식 평가와 실서비스 배포는 아래 범위대로 남겼습니다.
+저장소: https://github.com/molla11/autoblogger (main, 기능별 commit/push 완료)
 
-확정 범위
-- 1~6주차 기능을 구현하고 로컬에서 검증합니다. 실서비스 로그인·배포는 사용자 요청으로 이번에 진행하지 않습니다.
-- 초기 AI: OpenRouter openai/gpt-6.1-terra / Azure. 자동 fallback 없음. 관리자 설정에서 이후 변경 가능.
-- OpenRouter 인증 확인: $20 한도, 초기 잔여 $20. 키는 .env.local에만 보관합니다.
-- Ghost CMS: https://cms.shinem.dev. 기존 webhook → https://shinem.dev 배포를 유지합니다.
+1. 구현 범위
 
-개발 중 확인된 제약
-- Docker 소켓 접근 불가. 기본 PGlite 외에도 독립된 실제 PostgreSQL16.15와 Redis7을 사용자 권한으로 실행했습니다.
-- Ghost 기본 노드의 Lexical 0.13.1과 최신 BlockIdExtension은 호환되지 않습니다. 명세의 전환 조건에 따라 Tiptap + Ghost HTML 카드 경로를 사용합니다.
-- Ghost Admin API: User-Agent를 명시해 조회 인증 성공. 서버 Ghost6.67. 운영 사이트 글은 변경하지 않았습니다.
-- OpenRouter: Azure 지역 endpoint azure/eu로 지정한 모델 호출 성공. 상위 Azure 이름만으로는 라우팅이 거절되어 정확한 endpoint를 사용합니다.
-- 실제 사람의 10개 세션, 베타 참여 동의, 독립 평가자 채점은 자동 생성하지 않습니다. 이식/mock 테스트와 정식 평가를 구분합니다.
+1주차
+- VS Code .c/.cpp/.py 기록 시작·중지, 초기/저장 스냅샷, 해시 중복 제거, 메모·북마크, JSON 내보내기.
+- shell integration으로 사용자가 실행한 컴파일·Python·실행 명령을 관찰. 확장은 컴파일/실행하지 않음.
+- 컴파일 성공 당시 코드와 실행 파일 연결, 실패한 컴파일 후 이전 실행 파일의 버전 보존, 입력 리다이렉션·종료 상태·출력 제한.
+- A/B/C/C-검토 비교 도구와 사전 중요 사건 표시, 무작위 순서·조건 비공개 검토 파일, 사람 점수 집계 도구.
 
-완료 시 이 파일에 검증 결과, 보류 사유와 배포 절차를 갱신합니다.
+2주차
+- NestJS API, PostgreSQL 스키마 및 RLS, 계정별 소유권, 로컬 인증과 운영용 Supabase JWT 검증 경로.
+- PKCE 일회용 브라우저 연결 코드, VS Code URI·SecretStorage, 기기 폐기.
+- 디스크 저널과 ACK 범위·빠진 순번·중복 수신 처리, 오프라인/재시작 복구, 편집 병합, 30분 유휴 종료, 파일 제외·비밀값 가림.
+- 원본 스냅샷은 소유자·세션·내용 해시로 구분한 파일 객체로 저장. 운영에서는 private Supabase Storage를 선택할 수 있고, 기존 DB 인라인 원본도 계속 읽음.
+- 프로젝트·세션·파일별 타임라인, 코드 diff, 실행 결과, 연결된 원본, 문제 지문 수동 입력.
+- Ghost 노드의 Lexical 0.13.1이 BlockIdExtension 0.53과 호환되지 않아 명세의 전환 조건대로 Tiptap + Ghost HTML 카드 채택. docs/EDITOR-SPIKE.md에 근거 기록.
+
+3주차
+- OpenRouter 모델 어댑터, 시도 묶음·기획·스트리밍 초안·원본 근거 검토·실시간 요약.
+- 초기 모델 openai/gpt-6.1-terra / Azure만 사용. 현재 Azure endpoint의 정확한 slug는 azure/eu.
+- 모든 요청에 data_collection=deny, require_parameters=true, JSON Schema, allow_fallbacks=false. 다른 provider로 자동 우회하지 않음.
+- ModelRun에 요청 모델·응답 모델·provider endpoint·프롬프트 버전·호출 시도·토큰·비용·지연 기록.
+- BullMQ/Redis 별도 worker와 SSE, 취소·재시도·중단 작업 복구. 로컬 기본값은 API 내부 큐.
+- 사용자별 일/월 상한과 테스트 전체 예산. AI 차단 후에도 기록·편집·발행 가능.
+- 백그라운드 근거 검토는 내용 버전을 바꾸지 않고, 사용자가 이미 고친 블록을 덮어쓰지 않음.
+
+4주차
+- 제목·본문·목록·인용·언어 지정 코드·diff·이미지, 슬래시 메뉴·블록 이동, 안정적인 블록 ID.
+- 자동 저장, 다중 탭 충돌, 최근 50개 자동 버전과 영구 버전, 복원, 근거 패널·사건 삽입.
+- 블록 AI 비교·수락·거절, 오래된 제안 자동 적용 금지, 수정한 주장 확인 필요 표시.
+- Markdown 내보내기, 발행 미리보기, 실제 편집 완료 상태.
+- Ghost 암호화된 키 연결, 이미지 이관, 불변 버전 발행, 초안·공개·업데이트·공개 취소.
+- 원격 updated_at + 내용 fingerprint 비교. Ghost가 같은 초의 수정에 같은 updated_at을 주는 문제를 실제로 발견해 내용 비교로 보강.
+- 원격 비교 화면에서 사용자가 선택한 버전만 명시적으로 전송. 전송 직전 다시 확인.
+- 같은 글의 중복 발행 작업 차단, 응답 유실 시 기존 원격 글 확인, 서식 보존.
+
+5주차
+- 관리자 모델/provider 설정, 사용자 사용량·상한, 키 잔여, 실패 작업·재처리, 경보(대시보드만, 이메일 없음).
+- 크레딧 소진 시 새 사용자 대기 처리, 가입 중지 설정.
+- 데이터 JSON/Markdown 내보내기, 원본·파생물·작업 사본·연결 이미지 삭제 추적, 보관 기간 정리.
+- 온보딩·mock 기록, 개인정보/국외 이전 준비 안내, VSIX 패키징.
+
+6주차
+- 재현 가능한 평가 생성·채점 집계·성능 측정 도구와 결과 파일.
+- 실제 로컬 서비스·브라우저·VS Code·Ghost 통합 검증.
+- README, API/확장/에디터/Ghost 안내, CI, 배포 구성(Dockerfile, 선택적 로컬 compose).
+- 사람의 정식 평가와 실서비스 배포는 아래 보류 항목으로 명확히 분리.
+
+2. 로컬 실행
+
+필요 도구: Node.js 24, pnpm 11.5.1. Ghost 자체 테스트는 스크립트가 별도 지원 런타임을 임시 설치합니다.
+
+  pnpm install --frozen-lockfile
+  pnpm dev
+
+웹: http://localhost:3000
+API 상태: http://127.0.0.1:4000/api/health
+관리자 로컬 계정: admin@local.test
+일반 로컬 계정: tester@local.test
+
+기존 .env.local에 제공받은 OpenRouter/Ghost 키가 들어 있습니다. 덮어쓰지 마세요.
+로컬 인증은 암호 없이 선택하는 개발용 인증이며 production 또는 외부 인터페이스 bind에서는 기동을 거절합니다.
+기본 저장소는 .data/postgres의 PGlite, 이미지는 .data/uploads, 원본 스냅샷은 .data/source-blobs, 암호화 키는 .data/encryption.key에 보관합니다.
+기본 실행에는 Docker, Redis, Supabase 계정이 필요하지 않습니다. .data는 Git에 포함하지 않습니다.
+검증용 웹/API/worker/Ghost/PostgreSQL/Redis 프로세스는 종료했습니다. 키와 저장된 로컬 데이터는 보존했으며 pnpm dev로 다시 시작할 수 있습니다.
+자동 요약은 실제 모델 비용이 발생합니다. 비용 없이 기록·UI를 재생하려면 AUTO_SUMMARIES=false로 API를 시작하세요.
+
+확장:
+  pnpm --filter autoblogger-recorder package
+생성물: apps/extension/dist/autoblogger-recorder.vsix
+다른 PC에서는 GitHub Actions의 성공한 validate 실행에서 autoblogger-vsix artifact를 내려받을 수 있습니다.
+VS Code → Install from VSIX로 설치한 뒤 Autoblogger: 브라우저로 계정 연결 → 기록 시작.
+WSL에서는 작업 파일이 있는 extension host에 설치합니다. 상세: docs/EXTENSION.md.
+
+별도 PostgreSQL/Redis/worker 로컬 모드:
+  docker compose up -d
+.env.local에 DATABASE_URL, REDIS_URL을 설정한 뒤 API 재시작, 별도 터미널에서 pnpm worker 실행.
+PGlite 디렉터리는 별도 worker와 동시에 열지 않습니다. 실제 분리 worker는 PostgreSQL을 사용합니다.
+이번 환경에서는 Docker 소켓 권한이 없어 Ubuntu 패키지를 /tmp에 추출하여 PostgreSQL 16.15와 Redis 7을 실행·검증했습니다.
+
+3. 검증 결과
+
+- 단위·통합 77개 통과: API/PGlite 22, 원본 Storage 7, 실제 PostgreSQL 동시성 7, 확장 18, AI/Ghost 어댑터 11, 웹 모델/스트림 처리 12. 전체 typecheck/build 통과.
+- 프로덕션 웹 빌드 + 새 로컬 API에서 브라우저 11개 통과. 실제 Azure 초안·백그라운드 검토·편집 완료 흐름 16.174초. 무료 10개는 GitHub CI에서도 실행합니다.
+- GitHub CI에서 API/worker/web Docker 이미지 3개 빌드와 VSIX 패키징 성공. 로컬 Docker 소켓 제한은 CI 빌드로 보완했습니다. 운영 서비스 기동·배포는 하지 않았습니다.
+- 실제 PostgreSQL에서 같은 버전 동시 저장, 기기 코드 동시 교환, AI/발행 중복 등록, 계정 간 ID 충돌 방어, 15개 동시 수신 및 잠금 연결 고갈 방지 검증.
+- 원본 파일 저장·복원·내보내기·해시 중복 제거·부분 삭제 실패·재시작 복구와 레거시 inline 호환 검증. Supabase Storage는 모의 원격 저장소로 검사했으며 실프로젝트 검증은 배포 단계에 남깁니다.
+- 실제 VS Code 1.144.0 + Xvfb에서 두 프로세스에 걸친 12개 검증 통과. 실제 C++/Python 실행 관찰·디스크 버전 연결·출력·재시작 복구 포함.
+- 실제 Ghost 6.67.0 + SQLite에서 11개 검증 통과. 실제 공개 페이지의 코드/diff/이미지, 공개 취소 후 404까지 확인.
+- API → Redis → 별도 worker → 실제 로컬 Ghost의 이미지·서식·공개·충돌·공개 취소 4개 통합 검사 통과.
+- 실제 Azure로 mock A/B/C/C-검토 8개 생성·검토: $0.0559506. 생성 시작부터 첫 초안 토큰까지 작은 표본의 관측 p95는 6182ms.
+- 원본 Storage 적용 후 별도 worker 실제 AI 흐름: 초안 9707ms, 요약 2037ms. 검토·오래된 제안 거절·상한 도달 시 편집 유지 포함. 이 실행 비용 $0.0315435.
+- 위 시간은 작은 합성 기록의 smoke 수치이며, 30분 실제 세션 또는 서비스 전체 p95 목표 달성으로 해석하지 않습니다.
+- 키 조회/운영 Ghost 읽기 인증은 성공. 운영 사이트 글에는 쓰지 않았습니다.
+- 최종 OpenRouter 키 조회: 전체 테스트 사용 $0.1915494, 잔여 $19.8084506 / $20. 키 2개가 Git 추적 파일 105개에 포함되지 않았음을 값 대조로 확인했습니다.
+- 평가 방법·동결한 프롬프트 해시는 docs/EVALUATION.md에 기록했습니다. 사람 점수는 미채점 8개/채점 0개로 보존했습니다.
+
+재현:
+  pnpm test
+  pnpm typecheck
+  pnpm build
+  # API/웹 실행 후 브라우저 검사
+  pnpm exec playwright install chromium
+  pnpm test:e2e
+  # 유료 모델 포함 실제 브라우저 흐름은 명시적 opt-in
+  LIVE_AI_TEST=true pnpm test:e2e
+  # 실제 PostgreSQL 검사는 별도 임시 DB 생성 권한이 있는 테스트 URL 사용
+  API_TEST_DATABASE_URL=postgresql://... pnpm test
+  # 실제 로컬 Ghost
+  node scripts/setup-local-ghost.mjs
+  pnpm exec tsx tests/ghost-local/run.ts
+  # 실제 Linux VS Code extension host (sudo 없이 별도 임시 환경 사용)
+  bash tests/vscode-host/run-linux.sh
+
+Ghost를 앱 worker까지 연결해 시험할 때만 개발 환경에 ALLOW_LOCAL_GHOST=true를 지정합니다. 운영에서는 적용되지 않습니다.
+검증용 Ghost 키는 /tmp/autoblogger-ghost/test-credentials.json에만 저장합니다. 운영 키로 테스트 글을 발행하지 않습니다.
+
+4. 테스트 데이터 및 평가
+
+ps-blogself는 테스트 시점에만 제한적으로 탐색했습니다. WSL 20개, Windows Code 93개 workspace storage에서 확장 설정값만 확인했고 코드 작성 기록은 찾지 못했습니다.
+기존 구현 코드, 프롬프트, 생성 글, 대화 기록은 읽지 않았습니다.
+따라서 mock C++/Python 기록을 현재 기록기로 생성했습니다. .data/imported/에 출처와 함께 저장합니다.
+
+  pnpm exec tsx apps/extension/scripts/create-mock-sessions.ts
+  pnpm exec tsx scripts/evaluate.ts --all
+  pnpm exec tsx scripts/evaluate.ts --all --repeat=3 --input=사전주석데이터.json
+  pnpm exec tsx scripts/score-evaluation.ts .data/evaluations/실행디렉터리
+
+입력 데이터는 [{sessionId,provenance,events,importantEvents:[{id,label}]}] 형태입니다. 중요한 사건 표시는 생성 전에 준비해야 합니다.
+결과 디렉터리의 blind-review.json은 조건 이름 없이 섞인 순서로 제공되며 점수는 null로 시작합니다. 사람의 채점 후 집계합니다.
+manifest.json에는 조건/모델/프롬프트/지연을, model-runs.json에는 실제 호출 기록을 저장합니다. 원자료는 공개 Git에 올리지 않습니다.
+본인 5개 + 동의받은 베타 5개, 독립 검토자 채점·인터뷰는 만들어낼 수 없으므로 정식 평가 완료로 표시하지 않았습니다.
+
+5. 보류·검증 범위
+
+- 실서비스 로그인·배포: 사용자가 이번 작업에서 제외하도록 명시했습니다. Supabase 실프로젝트 OAuth/JWT·Storage 연결, 공개 서비스 URL, 운영 리전 확정은 배포 시 진행합니다.
+- 사람의 실제 파일럿·베타 10개 세션·동의·교차 채점·인터뷰: 실제 참여자와 관측이 필요합니다. 구현 도구와 합성 검사로 대신 완료 처리하지 않았습니다.
+- Windows VS Code 클라이언트 → Remote WSL URI·SecretStorage의 실제 브라우저/OS 간 왕복: Linux VS Code를 WSL2 안에서 실행한 검증과 다릅니다. 실제 Windows 클라이언트 조합에서 최종 확인이 필요합니다.
+- 기존 cms.shinem.dev → webhook → shinem.dev의 공개 배포 반영: 운영 사이트에 글을 발행하지 않았으므로 이번 검증에 포함하지 않았습니다. 실제 공개 시 경로 매핑·이미지 표시·공개 취소 반영을 확인해야 합니다.
+- VS Code Marketplace/Open VSX 등록은 베타 VSIX 이후의 범위입니다. 게시자 계정·토큰을 준비한 뒤 진행합니다.
+- Ghost의 timestamp-only API 자체는 원격 읽기와 쓰기 사이의 극히 짧은 동시 수정 구간까지 원자적으로 잠글 수 없습니다. 서비스는 전송 직전 시각과 내용 fingerprint를 모두 검사합니다.
+
+6. 나중에 실서비스로 배포하는 방법
+
+A. 데이터·로그인
+- Supabase 프로젝트의 리전과 운영 DB를 정합니다. 코드의 RLS는 켜고 anon/authenticated용 직접 읽기 정책을 만들지 않습니다.
+- 서버에는 DATABASE_URL(직접 연결 또는 session pooler), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 설정합니다.
+- Supabase Auth에 GitHub OAuth를 등록하고 웹의 /auth/callback URL을 redirect allowlist에 추가합니다. 이메일 발송 구성은 하지 않습니다.
+- JWT는 Supabase JWKS로 검증합니다. 해당 프로젝트의 비대칭 서명 키/JWKS 구성을 확인하세요.
+- 관리자 Supabase 사용자 UUID를 ADMIN_USER_ID로 지정합니다.
+- 이미지 bucket(기본 autoblogger)을 private으로 만들고 10MB 제한 및 PNG/JPEG/GIF/WebP MIME 허용을 설정합니다.
+- 원본용 private bucket(기본 autoblogger-sources)을 별도로 만들고 text/plain, 1MB 제한을 지정합니다. API/worker 모두 SNAPSHOT_STORAGE=supabase, SUPABASE_SOURCE_BUCKET=autoblogger-sources를 설정합니다. 원본은 서버 자격 증명으로만 읽고 씁니다.
+
+B. API·worker
+- Node24 서버 또는 Dockerfile의 api/worker target을 각각 실행합니다.
+- 공통: NODE_ENV=production, AUTH_MODE=supabase, DATABASE_URL, REDIS_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY, ENCRYPTION_KEY.
+- ENCRYPTION_KEY는 충분히 긴 무작위 비밀값으로 만들고 API/worker에 동일하게 제공합니다. 키를 잃으면 저장된 Ghost 키를 복호화할 수 없습니다.
+- API: API_HOST, API_PORT, WEB_URL(정확한 웹 origin), PUBLIC_API_URL(공개 API origin)을 지정합니다. 역방향 프록시 뒤에서 HTTPS를 제공합니다.
+- worker: API와 같은 환경 및 업로드 저장소를 사용하고 pnpm worker 또는 worker target으로 별도 실행합니다.
+- 업로드를 로컬 디스크에 보관하는 경로는 API/worker에 공유 영구 볼륨이 필요합니다. 별도 호스트에서는 Supabase Storage 경로를 사용하도록 구성합니다.
+- 기존 로컬 원본을 가진 상태에서 Storage 모드를 바꾸더라도 이전 객체는 기존 위치를 참조합니다. 자동 일괄 이관은 하지 않으므로 이전 디스크를 유지하고 함께 백업합니다.
+- 서버 시작 시 스키마를 초기화하며 PostgreSQL advisory lock으로 여러 프로세스의 초기화를 직렬화합니다.
+- 운영 키 예산을 정한 뒤 OPENROUTER_TEST_BUDGET도 운영 정책에 맞게 조정합니다. 개발의 $20을 운영 예산으로 오해하지 마세요.
+
+C. 웹
+- 빌드 시 NEXT_PUBLIC_API_URL=https://API주소/api, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY를 제공합니다.
+- Next.js는 apps/web 기준으로 환경파일을 읽습니다. 루트 .env.local만으로 웹 public 변수가 빌드에 전달되는 것으로 가정하지 마세요. 빌드 환경 또는 apps/web/.env.local에 public 값만 지정합니다.
+- pnpm --filter @autoblogger/web build 후 start하거나 Dockerfile의 web target을 사용합니다. Docker 빌드에는 세 public 값을 --build-arg로 전달합니다.
+- OpenRouter/Ghost Admin/Storage service-role/암호화 키는 NEXT_PUBLIC_*로 제공하지 않습니다.
+
+D. 출시 전 확인
+- /api/health가 정상이고 local auth가 비활성화되었는지 확인합니다.
+- 서로 다른 두 실제 계정으로 프로젝트·글·파일·SSE·작업 소유권을 확인합니다.
+- Ghost 연결 화면에 cms.shinem.dev의 Custom Integration Admin Key를 입력합니다. Content API Key는 필요하지 않습니다.
+- 테스트용 글을 명시적으로 골라 초안·공개·업데이트·공개 취소 후 shinem.dev의 webhook 배포까지 확인합니다.
+- API/worker에 동일한 암호화 키와 영구 저장소를 제공하고 DB/파일 백업·복구 및 90일 보관 정리를 운영합니다.
+- 90일 정리 도구는 pnpm exec tsx scripts/retention.ts로 삭제 대상을 집계하고, --run을 붙이면 실제 정리합니다. 운영 서버의 동일한 환경·스토리지로 매일 실행하도록 운영 스케줄러에 등록합니다. 로컬 PGlite에서는 API를 종료한 상태에서 실행하고, 별도 실행은 PostgreSQL 모드에서 사용합니다. 관리자의 POST /api/retention/run도 지원합니다.
+- 운영자·호스팅 리전·이전받는 제공자(Azure EU 포함)를 확정한 뒤 개인정보/국외 이전 안내를 실제 운영 내용으로 완성합니다.
+
+참고 문서: README.md, docs/API-NOTES.md, docs/EXTENSION.md, docs/EDITOR-SPIKE.md, docs/GHOST-TEST.md, docs/EVALUATION.md.
