@@ -31,5 +31,5 @@
 
 - `pnpm --filter @autoblogger/web typecheck` 통과.
 - `pnpm exec vitest run apps/web/src/lib/editor-model.test.ts` 7개 통과.
-- 통합 브라우저 검증과 production build는 root 에이전트가 진행한다. `next dev`와 production build를 동일 .next 디렉터리에서 동시에 실행하지 않는다.
+- 스트림 처리 5개, 통합 브라우저 11개(실제 Azure 생성 포함), production build 통과. CI는 무료 브라우저 10개를 실행한다. `next dev`와 production build를 동일 .next 디렉터리에서 동시에 실행하지 않는다.
 - Next 16.4.3이 생성한 `apps/web/AGENTS.md`를 읽고 관련 bundled CSS/lazy loading 문서를 확인했다.

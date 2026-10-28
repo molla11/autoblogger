@@ -167,9 +167,9 @@ B. API·worker
 - 운영 키 예산을 정한 뒤 OPENROUTER_TEST_BUDGET도 운영 정책에 맞게 조정합니다. 개발의 $20을 운영 예산으로 오해하지 마세요.
 
 C. 웹
-- 빌드 시 NEXT_PUBLIC_API_URL=https://API주소/api, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY를 제공합니다.
+- 빌드 시 NEXT_PUBLIC_AUTH_MODE=supabase, NEXT_PUBLIC_API_URL=https://API주소/api, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY를 제공합니다. AUTH_MODE는 API용이고 NEXT_PUBLIC_AUTH_MODE는 웹용입니다.
 - Next.js는 apps/web 기준으로 환경파일을 읽습니다. 루트 .env.local만으로 웹 public 변수가 빌드에 전달되는 것으로 가정하지 마세요. 빌드 환경 또는 apps/web/.env.local에 public 값만 지정합니다.
-- pnpm --filter @autoblogger/web build 후 start하거나 Dockerfile의 web target을 사용합니다. Docker 빌드에는 세 public 값을 --build-arg로 전달합니다.
+- pnpm --filter @autoblogger/web build 후 start하거나 Dockerfile의 web target을 사용합니다. Docker web target은 AUTH_MODE public 값을 supabase로 기본 지정하고, 나머지 세 public 값을 --build-arg로 전달합니다.
 - OpenRouter/Ghost Admin/Storage service-role/암호화 키는 NEXT_PUBLIC_*로 제공하지 않습니다.
 
 D. 출시 전 확인
