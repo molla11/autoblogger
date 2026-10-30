@@ -17,10 +17,15 @@ async function main() {
     'workbench.startupEditor':'none','window.restoreWindows':'none','telemetry.telemetryLevel':'off','update.mode':'none'
   }));
   const executable = await downloadAndUnzipVSCode({version:'1.144.0',cachePath:'/tmp/autoblogger-vscode-tools/downloads'});
+  const net = require('node:net');
+  const listener = net.createServer();
+  await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const cdpPort = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
   for (const stage of ['first','restart']) {
     await runTests({vscodeExecutablePath:executable,extensionDevelopmentPath:path.join(root,'apps/extension'),extensionTestsPath:path.join(__dirname,'suite.cjs'),
-      extensionTestsEnv:{AUTOBLOGGER_TEST_SANDBOX:sandbox,AUTOBLOGGER_TEST_STAGE:stage},
-      launchArgs:[workspace,'--user-data-dir',userData,'--extensions-dir',path.join(sandbox,'extensions'),'--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes','--no-sandbox','--disable-gpu']});
+      extensionTestsEnv:{AUTOBLOGGER_TEST_SANDBOX:sandbox,AUTOBLOGGER_TEST_STAGE:stage,AUTOBLOGGER_CDP_PORT:String(cdpPort)},
+      launchArgs:[workspace,`--remote-debugging-port=${cdpPort}`,'--user-data-dir',userData,'--extensions-dir',path.join(sandbox,'extensions'),'--disable-extensions','--disable-workspace-trust','--skip-welcome','--skip-release-notes','--no-sandbox','--disable-gpu']});
   }
   console.log('VSCODE_HOST_ARTIFACTS',sandbox);
   await fs.writeFile('/tmp/autoblogger-vscode-tools/latest-artifacts.txt',sandbox);

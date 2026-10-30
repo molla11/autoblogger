@@ -27,6 +27,8 @@ pnpm --filter autoblogger-recorder package
 
 생성된 `apps/extension/dist/autoblogger-recorder.vsix`를 VS Code의 **Install from VSIX**로 설치합니다. 자세한 연결·기록·오프라인 복구 절차는 [확장 안내](docs/EXTENSION.md)를 참고하세요. 확장은 코드를 실행하지 않고 shell integration이 동작하는 통합 터미널만 관찰합니다.
 
+확장 0.2.0은 Activity Bar의 **Autoblogger**에서 기록 제어·세션 선택·동기화를 제공합니다. 세션 상세 탭에서 실행·코드 비교·메모를 확인하고 설정·연결 탭에서 모든 설정을 바꿀 수 있습니다. [GUI 사용법](apps/extension/README.md)과 [기능 명세](<docs/문제 해결 기록 블로그 서비스 — 1~6주차 기능 명세.md#vs-code-확장-gui-상세>)를 참고하세요.
+
 ## 검사
 
 ```sh

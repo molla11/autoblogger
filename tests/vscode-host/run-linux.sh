@@ -7,9 +7,12 @@ if [ ! -f "$test_tools/node_modules/@vscode/test-electron/package.json" ]; then
   npm install --prefix "$test_tools" @vscode/test-electron@2.5.2 --no-audit --no-fund
 fi
 if [ ! -x "$test_tools/xvfb/usr/bin/Xvfb" ] || [ ! -x "$test_tools/xvfb/usr/bin/xkbcomp" ]; then
+  # Refresh a private package index: the machine's apt lists can reference removed builds.
+  mkdir -p "$test_tools/apt/lists/partial" "$test_tools/apt/cache/archives/partial"
+  apt-get -o "Dir::State::lists=$test_tools/apt/lists" -o "Dir::Cache=$test_tools/apt/cache" update
   (
     cd "$test_tools/debs"
-    apt-get download xvfb xserver-common libxfont2 xauth libfontenc1 x11-xkb-utils xkb-data
+    apt-get -o "Dir::State::lists=$test_tools/apt/lists" -o "Dir::Cache=$test_tools/apt/cache" download xvfb xserver-common libxfont2 xauth libfontenc1 x11-xkb-utils xkb-data
     for package in ./*.deb; do dpkg-deb -x "$package" "$test_tools/xvfb"; done
   )
 fi

@@ -2,46 +2,191 @@
   "name": "autoblogger-recorder",
   "displayName": "Autoblogger Recorder",
   "description": "Record C, C++ and Python problem-solving sessions with source-linked terminal evidence.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "molla11",
   "license": "MIT",
-  "repository": {"type":"git", "url":"https://github.com/molla11/autoblogger.git", "directory":"apps/extension"},
-  "engines": {"vscode":"^1.93.0"},
-  "categories": ["Other"],
-  "extensionKind": ["workspace"],
-  "activationEvents": ["onStartupFinished", "onUri"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molla11/autoblogger.git",
+    "directory": "apps/extension"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri",
+    "onWebviewPanel:autoblogger.session",
+    "onWebviewPanel:autoblogger.settings"
+  ],
   "main": "./dist/extension.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src",
+    "test": "vitest run --root ../.. apps/extension/src",
     "vscode:prepublish": "pnpm build",
     "package": "pnpm build && vsce package --no-dependencies --out dist/autoblogger-recorder.vsix"
   },
-  "devDependencies": {"@types/vscode":"^1.93.0", "@vscode/vsce":"^3.6.1"},
+  "devDependencies": {
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.6.1"
+  },
   "contributes": {
     "commands": [
-      {"command":"autoblogger.start", "title":"Autoblogger: 기록 시작"},
-      {"command":"autoblogger.stop", "title":"Autoblogger: 기록 중지"},
-      {"command":"autoblogger.note", "title":"Autoblogger: 메모 추가"},
-      {"command":"autoblogger.bookmark", "title":"Autoblogger: 북마크 추가"},
-      {"command":"autoblogger.export", "title":"Autoblogger: 세션 JSON 내보내기"},
-      {"command":"autoblogger.connect", "title":"Autoblogger: 브라우저로 계정 연결"},
-      {"command":"autoblogger.disconnect", "title":"Autoblogger: 이 기기 연결 해제"},
-      {"command":"autoblogger.sync", "title":"Autoblogger: 지금 동기화"},
-      {"command":"autoblogger.exclude", "title":"Autoblogger: 현재 파일 수집 제외"},
-      {"command":"autoblogger.status", "title":"Autoblogger: 기록 상태 보기"}
+      {
+        "command": "autoblogger.start",
+        "title": "Autoblogger: 기록 시작"
+      },
+      {
+        "command": "autoblogger.stop",
+        "title": "Autoblogger: 기록 중지"
+      },
+      {
+        "command": "autoblogger.note",
+        "title": "Autoblogger: 메모 추가"
+      },
+      {
+        "command": "autoblogger.bookmark",
+        "title": "Autoblogger: 북마크 추가"
+      },
+      {
+        "command": "autoblogger.export",
+        "title": "Autoblogger: 세션 JSON 내보내기"
+      },
+      {
+        "command": "autoblogger.connect",
+        "title": "Autoblogger: 브라우저로 계정 연결"
+      },
+      {
+        "command": "autoblogger.disconnect",
+        "title": "Autoblogger: 이 기기 연결 해제"
+      },
+      {
+        "command": "autoblogger.sync",
+        "title": "Autoblogger: 지금 동기화"
+      },
+      {
+        "command": "autoblogger.exclude",
+        "title": "Autoblogger: 현재 파일 수집 제외"
+      },
+      {
+        "command": "autoblogger.status",
+        "title": "Autoblogger: 기록 상태 보기"
+      },
+      {
+        "command": "autoblogger.openSettings",
+        "title": "Autoblogger: 설정·연결 열기",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "autoblogger.openSession",
+        "title": "Autoblogger: 세션 상세 열기",
+        "icon": "$(history)"
+      }
     ],
     "configuration": {
-      "title":"Autoblogger",
+      "title": "Autoblogger",
       "properties": {
-        "autoblogger.apiUrl":{"type":"string", "default":"http://127.0.0.1:4000/api", "description":"NestJS API 주소. 로컬 개발 이외에는 HTTPS 사용."},
-        "autoblogger.webUrl":{"type":"string", "default":"http://localhost:3000", "description":"로그인 웹 주소."},
-        "autoblogger.excludePatterns":{"type":"array", "items":{"type":"string"}, "default":["**/node_modules/**", "**/.git/**", "**/.venv/**", "**/venv/**"], "description":"프로젝트 상대 경로의 제외 glob. **, *, ? 지원."},
-        "autoblogger.syncIntervalSeconds":{"type":"number", "default":15, "minimum":5, "maximum":300},
-        "autoblogger.outputLimitBytes":{"type":"number", "default":262144, "minimum":1024, "maximum":262144},
-        "autoblogger.autoSync":{"type":"boolean", "default":true}
+        "autoblogger.apiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4000/api",
+          "description": "NestJS API 주소. 로컬 개발 이외에는 HTTPS 사용.",
+          "scope": "resource"
+        },
+        "autoblogger.webUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "로그인 웹 주소.",
+          "scope": "resource"
+        },
+        "autoblogger.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/.venv/**",
+            "**/venv/**"
+          ],
+          "description": "프로젝트 상대 경로의 제외 glob. **, *, ? 지원.",
+          "scope": "resource"
+        },
+        "autoblogger.syncIntervalSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 300,
+          "scope": "resource"
+        },
+        "autoblogger.outputLimitBytes": {
+          "type": "number",
+          "default": 262144,
+          "minimum": 1024,
+          "maximum": 262144,
+          "scope": "resource"
+        },
+        "autoblogger.autoSync": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "autoblogger",
+          "title": "Autoblogger",
+          "icon": "media/autoblogger.svg"
+        }
+      ]
+    },
+    "views": {
+      "autoblogger": [
+        {
+          "id": "autoblogger.recording",
+          "name": "현재 기록",
+          "type": "webview"
+        },
+        {
+          "id": "autoblogger.sessions",
+          "name": "세션"
+        },
+        {
+          "id": "autoblogger.connection",
+          "name": "연결·동기화",
+          "type": "webview"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "autoblogger.sessions",
+        "contents": "아직 기록된 세션이 없습니다.\n[현재 기록 열기](command:autoblogger.status)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "autoblogger.openSettings",
+          "when": "view == autoblogger.recording || view == autoblogger.connection",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "autoblogger.openSession",
+          "when": "false"
+        }
+      ]
     }
   }
 }

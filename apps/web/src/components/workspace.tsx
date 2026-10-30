@@ -92,6 +92,7 @@ export default function Workspace() {
     [connectParams, setConnectParams] = useState<URLSearchParams | null>(null),
     [jobDrawer, setJobDrawer] = useState(false);
   const activeArticleId = useRef("");
+  const [linkedFile, setLinkedFile] = useState("");
   activeArticleId.current = article?.id || "";
   const jobsRef = useRef<Job[]>([]),
     jobPayloads = useRef(new Map<string, Record<string, unknown>>()),
@@ -128,6 +129,14 @@ export default function Workspace() {
     const initialization = new AbortController();
     async function init() {
       const params = new URLSearchParams(location.search);
+      if (params.has("session") || params.get("view") === "settings") {
+        const target = new URLSearchParams();
+        for (const key of ["session", "file", "view"]) {
+          const value = params.get(key);
+          if (value && /^[a-zA-Z0-9_-]{1,100}$/.test(value)) target.set(key, value);
+        }
+        sessionStorage.setItem("autoblogger.open", target.toString());
+      }
       if (location.pathname === "/connect" || params.has("challenge")) {
         sessionStorage.setItem("autoblogger.connect", params.toString());
         setConnectParams(params);
@@ -187,6 +196,41 @@ export default function Workspace() {
   useEffect(() => {
     if (user) void refresh();
   }, [user?.id, refresh]);
+  useEffect(() => {
+    if (!user) return;
+    const raw = sessionStorage.getItem("autoblogger.open");
+    if (!raw) return;
+    const target = new URLSearchParams(raw);
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (target.get("view") === "settings") setView("settings");
+        else if (target.get("session")) {
+          const value = await api<SessionDetail>(`/sessions/${encodeURIComponent(target.get("session")!)}`);
+          const available = await api<Project[]>("/projects");
+          if (cancelled) return;
+          const parent = available.find(p => p.id === value.session.projectId);
+          if (!parent) throw new Error("세션의 프로젝트를 찾을 수 없습니다.");
+          const list = await api<Session[]>(`/projects/${parent.id}/sessions`);
+          if (cancelled) return;
+          const file = target.get("file") || "";
+          if (file && !value.files.some(f => f.id === file)) throw new Error("선택한 파일이 삭제되었거나 접근할 수 없습니다.");
+          setProject(parent); setSessions(list); setDetail(value); setLinkedFile(file); setArticle(null); setView("projects");
+        }
+        if (cancelled) return;
+        sessionStorage.removeItem("autoblogger.open");
+        const url = new URL(location.href);
+        for (const key of ["session", "file", "view"]) url.searchParams.delete(key);
+        history.replaceState(null, "", url);
+      } catch (error) {
+        if (!cancelled) {
+          notify(error instanceof ApiError && [403,404].includes(error.status) ? "세션이 삭제되었거나 현재 계정으로 접근할 수 없습니다." : errorMessage(error), true);
+          if (error instanceof ApiError && [403,404].includes(error.status)) sessionStorage.removeItem("autoblogger.open");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, notify]);
   const openArticle = useCallback(
     async (id: string) => {
       try {
@@ -725,7 +769,9 @@ export default function Workspace() {
                     ← 세션 목록
                   </button>
                   <Timeline
+                    key={detail.session.id}
                     detail={detail}
+                    initialFile={linkedFile}
                     onGenerate={(fileId) =>
                       void startJob({
                         kind: "generate",

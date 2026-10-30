@@ -127,18 +127,20 @@ export function EventDetail({
 }
 export default function Timeline({
   detail,
+  initialFile = "",
   onGenerate,
   onDelete,
   onRefresh,
   notify,
 }: {
   detail: SessionDetail;
+  initialFile?: string;
   onGenerate: (fileId?: string) => void;
   onDelete: () => void;
   onRefresh: () => void;
   notify: (message: string, error?: boolean) => void;
 }) {
-  const [file, setFile] = useState("all"),
+  const [file, setFile] = useState(detail.files.some(f => f.id === initialFile) ? initialFile : "all"),
     [expanded, setExpanded] = useState<Record<string, boolean>>({}),
     [chooseFile, setChooseFile] = useState(false);
   const events = detail.events || [];

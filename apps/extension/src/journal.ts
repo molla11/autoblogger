@@ -167,6 +167,24 @@ export class Journal {
   all(): RecordEvent[] {
     return structuredClone(this.events);
   }
+  get count(): number { return this.events.length; }
+  event(id: string): RecordEvent | undefined {
+    const event = this.events.find((event) => event.id === id);
+    return event ? structuredClone(event) : undefined;
+  }
+  /** UI queries never clone snapshot/output payloads for an entire session. */
+  overview() {
+    return this.events.map(({ data, ...event }) => ({
+      ...event,
+      acknowledged: this.received.has(event.sequence),
+      label: String(data.status ?? (data.bookmark ? "북마크" : "")),
+      preview: String(data.text ?? data.command ?? data.reason ?? "").slice(0, 160),
+    }));
+  }
+  previousSnapshot(fileId: string, sequence: number): RecordEvent | undefined {
+    const event = [...this.events].reverse().find((event) => event.fileId === fileId && event.type === "snapshot" && event.sequence < sequence);
+    return event ? structuredClone(event) : undefined;
+  }
   pending(limit = 100, maxBytes = 2 * 1024 * 1024): RecordEvent[] {
     const result: RecordEvent[] = [];
     let bytes = 0;

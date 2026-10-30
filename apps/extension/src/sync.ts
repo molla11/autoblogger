@@ -80,6 +80,7 @@ export async function syncJournals(options: SyncOptions): Promise<void> {
     );
     if (project?.excludePatterns)
       await journal.update({
+        remoteExcludePatterns: project.excludePatterns,
         excludePatterns: [
           ...new Set([
             ...journal.manifest.excludePatterns,

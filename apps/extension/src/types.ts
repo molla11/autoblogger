@@ -29,6 +29,7 @@ export interface SessionManifest {
   apiUrl?: string;
   recording: boolean;
   excludePatterns: string[];
+  remoteExcludePatterns?: string[];
   serverCreated?: boolean;
   serverEnded?: boolean;
 }

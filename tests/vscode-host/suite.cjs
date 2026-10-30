@@ -39,8 +39,10 @@ async function execute(terminal,command) {
 exports.run=async()=>{
   const stage=process.env.AUTOBLOGGER_TEST_STAGE;
   const extension=vscode.extensions.getExtension('molla11.autoblogger-recorder');assert.ok(extension,'development extension discovered');await extension.activate();pass('extension activation');
+  const guiTests=require('./gui.cjs');
+  const gui=await guiTests.connect(vscode);
   if(stage==='first') {
-    void vscode.commands.executeCommand('autoblogger.start');
+    await guiTests.start(gui);
     await until(async()=>{const j=await current();return j?.events.filter(e=>e.type==='snapshot').length===2;},'initial snapshots');
     await vscode.commands.executeCommand('notifications.clearAll').catch(()=>undefined);pass('initial C++/Python snapshots');
     const terminal=vscode.window.createTerminal({name:'Autoblogger test harness',cwd:workspace,shellPath:'/bin/bash',env:{HISTFILE:'/dev/null'}});terminal.show();
@@ -54,7 +56,10 @@ exports.run=async()=>{
     const combined=await execute(terminal,'g++ solution.cpp -o solution && ./solution');assert.equal(combined.run.data.status,'success');assert.ok(combined.run.data.output.includes('cpp-two'));assert.notEqual(combined.run.data.snapshotId,compiledVersion);pass('combined compile/run captures new disk version');
     await edit('solution.cpp','int main(){ missing_name }\n');
     const failure=await execute(terminal,'g++ solution.cpp -o solution');assert.equal(failure.run.data.status,'compile_error');pass('real compiler diagnostic classification');
-    await vscode.commands.executeCommand('autoblogger.stop');
+    await guiTests.review(gui,vscode,(await current()).manifest.id,workspace,sandbox,until,current,pass);
+    await vscode.commands.executeCommand('autoblogger.status');
+    await gui.frame.getByRole('button',{name:'기록 중지',exact:true}).click();
+    await until(async()=>!(await current()).manifest.recording,'GUI stop persisted');
     assert.equal((await current()).manifest.recording,false);pass('explicit stop persisted');
     terminal.dispose();
     await sleep(100);
@@ -63,10 +68,12 @@ exports.run=async()=>{
     await vscode.commands.executeCommand('notifications.clearAll').catch(()=>undefined);
     const before=await current();await fs.writeFile(path.join(sandbox,'restart-check.json'),JSON.stringify({sessionId:before.manifest.id,eventIds:before.events.map(e=>e.id)}));
     pass('active session journal prepared for process restart');
+    await guiTests.restart(gui,vscode,before.manifest.id,pass);
   } else {
     const before=JSON.parse(await fs.readFile(path.join(sandbox,'restart-check.json'),'utf8'));
     const j=await current();assert.equal(j.manifest.id,before.sessionId);assert.equal(j.manifest.recording,true);
     for(const id of before.eventIds)assert.ok(j.events.some(e=>e.id===id));pass('recording restored after actual VSCode process restart');
+    await guiTests.checkRestart(gui,vscode,j.manifest.id,pass);
     await edit('solution.py',"print('python-after-restart')\n");
     const terminal=vscode.window.createTerminal({name:'Autoblogger restarted harness',cwd:workspace,shellPath:'/bin/bash',env:{HISTFILE:'/dev/null'}});terminal.show();
     const execution=await execute(terminal,'python3 solution.py');assert.ok(execution.run.data.output.includes('python-after-restart'));
@@ -76,5 +83,6 @@ exports.run=async()=>{
     for(const item of all){assert.deepEqual(item.events.map(e=>e.sequence),item.events.map((_,i)=>i+1));assert.equal(new Set(item.events.map(e=>e.id)).size,item.events.length);}
     pass('durable journal sequences remain contiguous and unique');
   }
+  await gui.browser.close();
   await fs.writeFile(path.join(sandbox,`results-${stage}.json`),JSON.stringify({stage,results,vscodeVersion:vscode.version,platform:process.platform,remoteName:vscode.env.remoteName??null},null,2));
 };
