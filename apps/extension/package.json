@@ -2,7 +2,7 @@
   "name": "autoblogger-recorder",
   "displayName": "Autoblogger Recorder",
   "description": "Record C, C++ and Python problem-solving sessions with source-linked terminal evidence.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "molla11",
   "license": "MIT",
   "repository": {

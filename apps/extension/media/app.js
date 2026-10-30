@@ -24,7 +24,7 @@
   function act(action, payload = {}) {
     if (busy) return;
     busy = true; render();
-    const id = send('action', payload, action); pending.set(id, action);
+    const id = send('action', payload, action); pending.set(id, {action, payload});
   }
   function folders(current) { return (model.folders || []).map(f => option(f.path, f.name, current)).join(''); }
   function connectionName() { return ({connected:'계정 연결됨',connecting:'브라우저 로그인 대기',changed:'서버 변경 · 재연결 필요',disconnected:'계정 미연결'}[model.connection]); }
@@ -160,9 +160,21 @@
     } else if (message.type === 'focusMemo') {
       view.bookmark=message.bookmark; persist(); render(); document.getElementById('memo')?.focus();
     } else if (message.type === 'result') {
+      const completed = pending.get(message.id);
       if (pending.has(message.id)) { pending.delete(message.id); busy=false; }
-      if (message.result?.clearDraft) { view.draft=''; delete view.target; persist(true); }
-      if (message.result?.settingsSaved) { settingsDraft=undefined; settingsRevision=undefined; store(); }
+      if (message.result?.clearDraft && completed?.action === 'memo' &&
+          view.draft === completed.payload.text && !!view.bookmark === completed.payload.bookmark &&
+          JSON.stringify(view.target) === JSON.stringify(completed.payload.target)) {
+        view.draft=''; delete view.target; persist(true);
+      }
+      if (message.result?.settingsSaved && completed?.action === 'saveSettings') {
+        if (!settingsDraft || JSON.stringify(settingsDraft) === JSON.stringify(completed.payload.values)) {
+          settingsDraft=undefined; settingsRevision=undefined;
+        } else {
+          settingsRevision=message.result.revision;
+        }
+        store();
+      }
       announce(typeof message.result === 'string' ? message.result : message.result?.message); render();
     } else if (message.type === 'error') {
       if (pending.has(message.id)) { pending.delete(message.id); busy=false; }

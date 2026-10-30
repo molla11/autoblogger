@@ -698,7 +698,7 @@ class Extension {
         const target = payload.scope === "folder" && root ? vscode.ConfigurationTarget.WorkspaceFolder : payload.scope === "workspace" && vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : payload.scope === "user" ? vscode.ConfigurationTarget.Global : undefined;
         if (target === undefined) throw new Error("설정 저장 범위를 선택하세요.");
         for (const [key, value] of Object.entries(values)) await config.update(key, value, target);
-        await this.configurationChanged(); return { message: "설정을 저장했습니다.", settingsSaved: true };
+        await this.configurationChanged(); return { message: "설정을 저장했습니다.", settingsSaved: true, revision: JSON.stringify(this.settings(root)) };
       }
       case "file": case "snapshot": case "diff": {
         if (!journal || typeof payload.eventId !== "string") throw new Error("사건을 선택하세요.");

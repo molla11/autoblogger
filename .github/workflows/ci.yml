@@ -14,6 +14,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test --config tests/extension-ui/playwright.config.ts
       - run: pnpm test:e2e
       - name: Build deployment containers
         run: |

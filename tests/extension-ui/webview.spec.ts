@@ -36,6 +36,36 @@ test('memo target survives focus changes and host refresh; errors preserve draft
   await expect(page.getByRole('status')).toContainText('세션이 종료되었습니다.');
   await expect(page.getByLabel('메모',{exact:true})).toHaveValue('경계 조건을 다시 확인한다.');
 });
+test('saving a memo preserves text entered while the save is pending',async({page})=>{
+  await boot(page,'recording');
+  await page.getByLabel('메모',{exact:true}).fill('첫 번째 메모');
+  await page.getByRole('button',{name:'메모 저장',exact:true}).click();
+  const message=await page.evaluate(()=>(window as any).messages.findLast((m:any)=>m.action==='memo'));
+  await page.getByLabel('메모',{exact:true}).fill('저장 중 새로 입력한 메모');
+  await page.evaluate(id=>window.postMessage({type:'result',id,result:{message:'메모를 저장했습니다.',clearDraft:true}},'*'),message.id);
+  await expect(page.getByRole('status')).toContainText('메모를 저장했습니다.');
+  await expect(page.getByLabel('메모',{exact:true})).toHaveValue('저장 중 새로 입력한 메모');
+});
+test('saving settings retains edits made during the request against the saved revision',async({page})=>{
+  await boot(page,'settings');
+  await page.getByLabel('동기화 주기 (초)',{exact:true}).fill('25');
+  await page.getByRole('button',{name:'설정 저장',exact:true}).click();
+  const message=await page.evaluate(()=>(window as any).messages.findLast((m:any)=>m.action==='saveSettings'));
+  await page.getByLabel('동기화 주기 (초)',{exact:true}).fill('35');
+  const revision=JSON.stringify(message.payload.values);
+  await page.evaluate(({id,revision})=>{
+    const w=window as any;
+    w.model.settings=JSON.parse(revision);w.model.revision=revision;
+    window.postMessage({type:'model',model:w.model,view:{}},'*');
+    window.postMessage({type:'result',id,result:{message:'설정을 저장했습니다.',settingsSaved:true,revision}},'*');
+  },{id:message.id,revision});
+  await expect(page.getByRole('status')).toContainText('설정을 저장했습니다.');
+  await expect(page.getByLabel('동기화 주기 (초)',{exact:true})).toHaveValue('35');
+  await page.getByRole('button',{name:'설정 저장',exact:true}).click();
+  const next=await page.evaluate(()=>(window as any).messages.findLast((m:any)=>m.action==='saveSettings'));
+  expect(next.payload.revision).toBe(revision);
+  expect(next.payload.values.syncIntervalSeconds).toBe(35);
+});
 test('session renders captured HTML as text and tabs support keyboard navigation',async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await boot(page,'session');
