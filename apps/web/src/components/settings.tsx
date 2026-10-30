@@ -9,14 +9,14 @@ import {
   Laptop,
   Link2,
   Plus,
+  LogOut,
   Shield,
   Trash2,
   Unplug,
-  UserRound,
 } from "lucide-react";
 import { api, post, download, date, errorMessage } from "@/lib/api";
 import type { User, Device } from "@/lib/types";
-import { Badge, Modal, Empty } from "./ui";
+import { Badge, Modal, Empty, PageHead, ShowMore } from "./ui";
 export default function Settings({
   user,
   notify,
@@ -35,7 +35,9 @@ export default function Settings({
     [busy, setBusy] = useState(false),
     [deleteModal, setDeleteModal] = useState(false),
     [deleteGhost, setDeleteGhost] = useState(false),
-    [confirmation, setConfirmation] = useState("");
+    [confirmation, setConfirmation] = useState(""),
+    [allDevices, setAllDevices] = useState(false);
+  const activeDevices = devices.filter((d) => !d.revokedAt);
   const refresh = () => {
     api<typeof ghost>("/ghost")
       .then((value) => {
@@ -106,15 +108,14 @@ export default function Settings({
   }
   return (
     <section className="settings-page">
-      <div className="page-heading">
-        <div className="eyebrow">YOUR WORKSPACE</div>
-        <h1>연결과 데이터</h1>
-        <p>내 기록이 어디에 저장되고, 어디로 발행되는지 관리하세요.</p>
-      </div>
+      <PageHead
+        title="연결과 데이터"
+        description="내 기록이 어디에 저장되고, 어디로 발행되는지 관리하세요."
+      />
       <div className="settings-grid">
         <section className="card settings-card">
           <div className="card-title">
-            <Cable size={20} />
+            <Cable size={18} />
             <h2>Ghost 연결</h2>
             <Badge tone={ghost.connected ? "green" : "neutral"}>
               {ghost.connected ? "연결됨" : "연결 필요"}
@@ -186,20 +187,19 @@ export default function Settings({
         </section>
         <section className="card settings-card">
           <div className="card-title">
-            <Laptop size={20} />
+            <Laptop size={18} />
             <h2>연결된 기기</h2>
           </div>
           <p className="muted">
             VS Code 확장에서 「Autoblogger: 로그인」을 실행하면 브라우저에서
             연결을 승인할 수 있습니다.
           </p>
-          {devices.filter((d) => !d.revokedAt).length ? (
+          {activeDevices.length ? (
             <div className="device-list">
-              {devices
-                .filter((d) => !d.revokedAt)
-                .map((d) => (
+              {(allDevices ? activeDevices : activeDevices.slice(0, 4)).map(
+                (d) => (
                   <div key={d.id}>
-                    <Laptop size={18} />
+                    <Laptop size={16} />
                     <span>
                       <strong>{d.name}</strong>
                       <small>{date(d.lastSeenAt || d.createdAt)}</small>
@@ -211,10 +211,17 @@ export default function Settings({
                       폐기
                     </button>
                   </div>
-                ))}
+                ),
+              )}
+              <ShowMore
+                total={activeDevices.length}
+                limit={4}
+                expanded={allDevices}
+                onToggle={() => setAllDevices(!allDevices)}
+              />
             </div>
           ) : (
-            <Empty icon={<Laptop />} title="연결된 기기가 없어요">
+            <Empty compact title="연결된 기기가 없어요">
               확장을 설치하고 이 계정에 연결해 주세요.
             </Empty>
           )}
@@ -223,22 +230,34 @@ export default function Settings({
             실행하지 않습니다.
           </div>
         </section>
-        <section className="card settings-card">
+        <section className="card settings-card wide">
           <div className="card-title">
-            <Shield size={20} />
-            <h2>내 데이터</h2>
+            <Shield size={18} />
+            <h2>계정과 데이터</h2>
           </div>
-          <p className="muted">
-            원본 기록 기본 보관 기간은 90일입니다. 글과 버전은 직접 삭제할
-            때까지 보관합니다.
-          </p>
+          <div className="data-action">
+            <span className="account-id">
+              <span className="avatar">{user.email[0].toUpperCase()}</span>
+              <span>
+                <strong>{user.email}</strong>{" "}
+                <Badge>{user.role === "admin" ? "관리자" : "사용자"}</Badge>
+                <small>
+                  AI 한도에 도달해도 기록·편집·발행은 계속 사용할 수 있습니다.
+                </small>
+              </span>
+            </span>
+            <button className="button subtle" onClick={onLogout}>
+              <LogOut size={15} />
+              로그아웃
+            </button>
+          </div>
           <div className="data-action">
             <span>
               <strong>전체 데이터 내보내기</strong>
               <small>프로젝트, 기록, 글과 설정을 JSON으로 저장합니다.</small>
             </span>
             <button className="button secondary" onClick={exportAccount}>
-              <FileDown size={16} />
+              <FileDown size={15} />
               내보내기
             </button>
           </div>
@@ -251,29 +270,17 @@ export default function Settings({
               className="button subtle danger"
               onClick={() => setDeleteModal(true)}
             >
-              <Trash2 size={16} />
+              <Trash2 size={15} />
               삭제
             </button>
           </div>
-          <a className="text-button" href="/privacy" target="_blank">
-            개인정보와 보관 정책 <ExternalLink size={13} />
-          </a>
-        </section>
-        <section className="card settings-card">
-          <div className="card-title">
-            <UserRound size={20} />
-            <h2>계정</h2>
-          </div>
-          <p>
-            <strong>{user.email}</strong>{" "}
-            <Badge>{user.role === "admin" ? "관리자" : "사용자"}</Badge>
+          <p className="card-foot">
+            원본 기록 기본 보관 기간은 90일입니다. 글과 버전은 직접 삭제할
+            때까지 보관합니다.{" "}
+            <a className="text-button" href="/privacy" target="_blank">
+              개인정보와 보관 정책 <ExternalLink size={12} />
+            </a>
           </p>
-          <p className="muted">
-            AI 한도에 도달해도 기록·편집·발행은 계속 사용할 수 있습니다.
-          </p>
-          <button className="button subtle" onClick={onLogout}>
-            로그아웃
-          </button>
         </section>
       </div>
       {deleteModal && (

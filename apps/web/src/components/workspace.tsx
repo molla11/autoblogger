@@ -6,15 +6,12 @@ import {
   ArrowUpRight,
   BookOpen,
   Braces,
-  Check,
   ChevronRight,
-  Clock3,
-  Code2,
   FileText,
   FolderOpen,
   LayoutDashboard,
+  LogOut,
   Menu,
-  MoreHorizontal,
   Plus,
   Search,
   Settings2,
@@ -26,7 +23,6 @@ import {
   Trash2,
   Link2,
   Play,
-  Square,
 } from "lucide-react";
 import {
   api,
@@ -53,8 +49,11 @@ import {
   Badge,
   Empty,
   Modal,
+  PageHead,
   Spinner,
+  StatStrip,
   Toast,
+  articleStatusLabel,
   jobLabels,
   statusLabels,
 } from "./ui";
@@ -87,6 +86,7 @@ export default function Workspace() {
     [projectName, setProjectName] = useState(""),
     [rootPath, setRootPath] = useState(""),
     [search, setSearch] = useState(""),
+    [articleFilter, setArticleFilter] = useState("all"),
     [mobileNav, setMobileNav] = useState(false),
     [busy, setBusy] = useState(false),
     [connectParams, setConnectParams] = useState<URLSearchParams | null>(null),
@@ -438,11 +438,29 @@ export default function Workspace() {
     setDetail(null);
     setProject(null);
     setSearch("");
+    setArticleFilter("all");
     setMobileNav(false);
   };
   const activeJobs = jobs.filter((j) =>
     ["running", "queued"].includes(j.status),
   );
+  useEffect(() => {
+    if (!mobileNav) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNav(false);
+    };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [mobileNav]);
+  const deleteArticle = async (target: Article) => {
+    if (!confirm("보관함에서 이 글을 삭제할까요?")) return;
+    try {
+      await api(`/articles/${target.id}`, { method: "DELETE" });
+      await refresh();
+    } catch (e) {
+      notify(errorMessage(e), true);
+    }
+  };
   if (!ready)
     return (
       <div className="loading full">
@@ -469,21 +487,64 @@ export default function Workspace() {
         )}
       </>
     );
+  const usedThisMonth = Number(user.usage?.month || 0),
+    monthlyLimit = user.monthlyLimit || 15;
+  const query = search.trim().toLowerCase();
+  const articleFilters = [
+    { id: "all", label: "전체", match: () => true },
+    {
+      id: "local",
+      label: "내 보관함",
+      match: (a: Article) => !["draft", "published"].includes(a.status),
+    },
+    {
+      id: "draft",
+      label: "Ghost 초안",
+      match: (a: Article) => a.status === "draft",
+    },
+    {
+      id: "published",
+      label: "공개",
+      match: (a: Article) => a.status === "published",
+    },
+    {
+      id: "completed",
+      label: "편집 완료",
+      match: (a: Article) => !!a.editingCompletedAt,
+    },
+  ];
+  const activeFilter =
+    articleFilters.find((f) => f.id === articleFilter) || articleFilters[0];
+  const visibleArticles = articles.filter(
+    (a) =>
+      activeFilter.match(a) && (a.title || "").toLowerCase().includes(query),
+  );
+  const sessionIndex = detail
+    ? sessions.findIndex((s) => s.id === detail.session.id)
+    : -1;
+  const newProjectButton = (
+    <button className="button primary" onClick={() => setNewProject(true)}>
+      <Plus size={15} />새 프로젝트
+    </button>
+  );
   return (
     <div className={`app-shell ${article ? "editing" : ""}`}>
-      <aside className={`app-sidebar ${mobileNav ? "open" : ""}`}>
+      <header className="topbar">
+        <button
+          className="icon-button mobile-menu"
+          onClick={() => setMobileNav(!mobileNav)}
+          aria-label="메뉴 열기"
+          aria-expanded={mobileNav}
+        >
+          <Menu size={19} />
+        </button>
         <button className="brand" onClick={() => navigate("home")}>
           <span className="brand-mark">
-            <Braces size={23} />
+            <Braces size={15} />
           </span>
-          <span>
-            풀이의 기록<small>AUTOBLOGGER</small>
-          </span>
+          <span className="brand-name">풀이의 기록</span>
         </button>
-        <div className="workspace-label">
-          개인 작업 공간 <Badge>LOCAL</Badge>
-        </div>
-        <nav>
+        <nav className={`topnav ${mobileNav ? "open" : ""}`} aria-label="주 메뉴">
           {(
             [
               { id: "home", label: "대시보드", icon: LayoutDashboard },
@@ -496,314 +557,215 @@ export default function Workspace() {
             ] as const
           ).map((item) => (
             <button
-              className={view === item.id ? "active" : ""}
+              className={view === item.id && !article ? "active" : ""}
+              aria-current={view === item.id && !article ? "page" : undefined}
               key={item.id}
               onClick={() => navigate(item.id as View)}
             >
-              <item.icon size={18} />
+              <item.icon size={15} />
               {item.label}
               {item.id === "articles" && <small>{articles.length}</small>}
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <div className="note-symbol">✳</div>
-          <strong>
-            정답까지의 과정도,
-            <br />
-            하나의 이야기니까.
-          </strong>
-          <p>
-            작은 수정과 실패를
-            <br />
-            의미 있는 기록으로 남겨요.
-          </p>
-          <button onClick={sample} disabled={busy}>
-            샘플 기록 체험 <ArrowUpRight size={14} />
-          </button>
-        </div>
-        <div className="sidebar-bottom">
-          <div className="usage">
-            <span>이번 달 AI 사용량</span>
-            <strong>
-              {money(user.usage?.month)}{" "}
-              <small>/ ${user.monthlyLimit ?? 15}</small>
-            </strong>
-            <div className="usage-track">
-              <i
-                style={{
-                  width: `${Math.min(100, (Number(user.usage?.month || 0) / (user.monthlyLimit || 15)) * 100)}%`,
-                }}
-              />
-            </div>
-          </div>
-          <button className="profile" onClick={() => navigate("settings")}>
-            <span className="avatar">{user.email[0].toUpperCase()}</span>
-            <span>
-              <strong>{user.email.split("@")[0]}</strong>
-              <small>{user.role === "admin" ? "관리자" : "개인 계정"}</small>
-            </span>
-            <MoreHorizontal size={18} />
-          </button>
-        </div>
-      </aside>
-      <div className="app-main">
-        <header className="app-header">
+        <div className="topbar-right">
           <button
-            className="icon-button mobile-menu"
-            onClick={() => setMobileNav(!mobileNav)}
-            aria-label="메뉴 열기"
+            className={`job-indicator ${activeJobs.length ? "busy" : ""}`}
+            onClick={() => setJobDrawer(true)}
           >
-            <Menu size={20} />
-          </button>
-          <div className="breadcrumbs">
-            <span>작업 공간</span>
-            <ChevronRight size={14} />
-            <strong>
-              {
-                {
-                  home: "대시보드",
-                  projects: "풀이 기록",
-                  articles: "글 보관함",
-                  settings: "연결과 데이터",
-                  admin: "관리자",
-                }[view]
-              }
-            </strong>
-            {project && (
-              <>
-                <ChevronRight size={14} />
-                <span>{project.name}</span>
-              </>
-            )}
-          </div>
-          <div className="header-right">
-            <span className="connection-status">
-              <i />
-              로컬 작업 공간
-            </span>
-            <button
-              className="button subtle"
-              onClick={() => setJobDrawer(true)}
-            >
-              <ActivityIcon />
+            {activeJobs.length ? <Spinner /> : <ActivityIcon />}
+            <span className="job-label">
               {activeJobs.length
-                ? `${activeJobs.length}개 작업 진행 중`
+                ? `${jobLabels[activeJobs[0].kind] || "작업"} 진행 중${activeJobs.length > 1 ? ` 외 ${activeJobs.length - 1}개` : ""}`
                 : "작업 내역"}
-            </button>
-          </div>
-        </header>
-        {article ? (
-          <ArticleEditor
-            key={article.id}
-            article={article}
-            onBack={() => {
-              setArticle(null);
-              void refresh();
-            }}
-            onSaved={onArticleSaved}
-            notify={notify}
-            startJob={startJob}
+            </span>
+          </button>
+          <ProfileMenu
+            user={user}
+            used={usedThisMonth}
+            limit={monthlyLimit}
+            onSettings={() => navigate("settings")}
+            onLogout={logout}
           />
-        ) : (
-          <main className="main-content">
-            {connectParams && (
-              <ConnectBanner
-                params={connectParams}
-                notify={notify}
-                onClose={() => {
-                  setConnectParams(null);
-                  sessionStorage.removeItem("autoblogger.connect");
-                }}
+        </div>
+      </header>
+      {mobileNav && (
+        <div
+          className="nav-scrim"
+          aria-hidden="true"
+          onClick={() => setMobileNav(false)}
+        />
+      )}
+      {article ? (
+        <ArticleEditor
+          key={article.id}
+          article={article}
+          onBack={() => {
+            setArticle(null);
+            void refresh();
+          }}
+          onSaved={onArticleSaved}
+          notify={notify}
+          startJob={startJob}
+        />
+      ) : (
+        <main className="main-content">
+          {connectParams && (
+            <ConnectBanner
+              params={connectParams}
+              notify={notify}
+              onClose={() => {
+                setConnectParams(null);
+                sessionStorage.removeItem("autoblogger.connect");
+              }}
+            />
+          )}
+          {view === "home" && (
+            <>
+              <PageHead
+                title="오늘의 풀이가, 내일의 기록이 되도록."
+                description="코드에 남지 않은 생각과 시도를 한 편의 글로 이어보세요."
+                actions={
+                  <>
+                    <button
+                      className="button subtle"
+                      onClick={sample}
+                      disabled={busy}
+                    >
+                      {busy ? <Spinner /> : <Play size={14} />}샘플로 둘러보기
+                    </button>
+                    {newProjectButton}
+                  </>
+                }
               />
-            )}
-            {view === "home" && (
+              <StatStrip
+                items={[
+                  { label: "프로젝트", value: projects.length, unit: "개" },
+                  {
+                    label: "보관함의 글",
+                    value: articles.length,
+                    unit: "편",
+                    hint: `편집 완료 ${articles.filter((a) => a.editingCompletedAt).length}편`,
+                  },
+                  {
+                    label: "공개한 글",
+                    value: articles.filter((a) => a.status === "published")
+                      .length,
+                    unit: "편",
+                    hint: "Ghost에 발행",
+                  },
+                  {
+                    label: "이번 달 AI 사용량",
+                    value: money(usedThisMonth),
+                    hint: `/ $${monthlyLimit}`,
+                    meter: usedThisMonth / monthlyLimit,
+                  },
+                ]}
+              />
+              <div className="dash-grid">
+                <section className="panel">
+                  <header className="panel-head">
+                    <h2>최근 프로젝트</h2>
+                    <button
+                      className="text-button"
+                      onClick={() => navigate("projects")}
+                    >
+                      모두 보기 <ArrowRight size={14} />
+                    </button>
+                  </header>
+                  {projects.length ? (
+                    <ProjectList
+                      projects={projects.slice(0, 5)}
+                      onOpen={loadProject}
+                    />
+                  ) : (
+                    <Empty compact title="아직 프로젝트가 없어요">
+                      기록할 작업 폴더마다 프로젝트를 하나씩 만드세요.
+                    </Empty>
+                  )}
+                </section>
+                <section className="panel">
+                  <header className="panel-head">
+                    <h2>최근 글</h2>
+                    <button
+                      className="text-button"
+                      onClick={() => navigate("articles")}
+                    >
+                      모두 보기 <ArrowRight size={14} />
+                    </button>
+                  </header>
+                  {articles.length ? (
+                    <ArticleList
+                      articles={articles.slice(0, 5)}
+                      onOpen={(id) => void openArticle(id)}
+                    />
+                  ) : (
+                    <Empty compact title="아직 글이 없어요">
+                      풀이 세션에서 ‘초안 만들기’를 누르면 여기에 글이
+                      생깁니다.
+                    </Empty>
+                  )}
+                </section>
+              </div>
+              <section className="steps" aria-label="VS Code에서 기록하는 순서">
+                <Terminal size={18} />
+                <strong>VS Code에서 풀이를 기록하세요</strong>
+                <ol>
+                  <li>확장 연결</li>
+                  <li>기록 시작</li>
+                  <li>통합 터미널에서 실행</li>
+                  <li>초안 만들기</li>
+                </ol>
+                <button
+                  className="text-button"
+                  onClick={() => navigate("settings")}
+                >
+                  연결 안내 <ArrowUpRight size={14} />
+                </button>
+              </section>
+            </>
+          )}
+          {view === "projects" &&
+            (detail ? (
+              <Timeline
+                key={detail.session.id}
+                detail={detail}
+                title={
+                  sessionIndex >= 0
+                    ? `풀이 세션 ${sessions.length - sessionIndex}`
+                    : "풀이 세션"
+                }
+                backLabel={project?.name || "세션 목록"}
+                initialFile={linkedFile}
+                onBack={() => setDetail(null)}
+                onGenerate={(fileId) =>
+                  void startJob({
+                    kind: "generate",
+                    sessionId: detail.session.id,
+                    ...(fileId ? { fileId } : {}),
+                  })
+                }
+                onRefresh={() => void loadSession(detail.session.id)}
+                onDelete={() => {
+                  setDetail(null);
+                  if (project) void loadProject(project);
+                }}
+                notify={notify}
+              />
+            ) : project ? (
               <>
-                <div className="page-heading">
-                  <div className="eyebrow">A LITTLE PROGRESS, EVERY DAY</div>
-                  <h1>
-                    오늘의 풀이가,
-                    <br />
-                    <span>내일의 기록이 되도록.</span>
-                  </h1>
-                  <p>코드에 남지 않은 생각과 시도를 한 편의 글로 이어보세요.</p>
-                </div>
-                <div className="dashboard-hero">
-                  <div>
-                    <Badge tone="green">기록에서 글까지</Badge>
-                    <h2>
-                      완성된 코드 너머의
-                      <br />
-                      이야기를 남겨보세요.
-                    </h2>
-                    <p>
-                      저장한 코드, 실행 결과, 메모를 모아
-                      <br />
-                      근거가 연결된 나만의 풀이 글을 만듭니다.
-                    </p>
-                    <div className="actions">
-                      <button
-                        className="button primary"
-                        onClick={() => setNewProject(true)}
-                      >
-                        <Plus size={16} />새 프로젝트
-                      </button>
-                      <button
-                        className="button subtle"
-                        onClick={sample}
-                        disabled={busy}
-                      >
-                        {busy ? <Spinner /> : <Play size={15} />}샘플로 둘러보기
-                      </button>
-                    </div>
-                  </div>
-                  <div className="hero-illustration" aria-hidden="true">
-                    <div className="paper-card back">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                    <div className="code-card">
-                      <span className="terminal-dots">
-                        <i />
-                        <i />
-                        <i />
-                      </span>
-                      <code>
-                        <em>while</em> (trying) {"{"}
-                        <br />
-                        &nbsp;&nbsp;learn();
-                        <br />
-                        &nbsp;&nbsp;<b>record</b>();
-                        <br />
-                        {"}"}
-                      </code>
-                    </div>
-                    <div className="paper-card front">
-                      <div className="tiny-label">SOLUTION NOTE</div>
-                      <strong>
-                        한 번의 실패,
-                        <br />
-                        다음의 실마리.
-                      </strong>
-                      <span />
-                      <span />
-                      <div className="evidence-mini">
-                        <Check size={12} />
-                        근거가 연결된 문장
-                      </div>
-                    </div>
-                    <div className="floating-star">✳</div>
-                  </div>
-                </div>
-                <div className="stat-grid">
-                  <div className="stat-card">
-                    <FolderOpen />
-                    <span>기록 중인 프로젝트</span>
-                    <strong>
-                      {projects.length}
-                      <small>개</small>
-                    </strong>
-                    <small>나의 풀이 작업 공간</small>
-                  </div>
-                  <div className="stat-card">
-                    <FileText />
-                    <span>보관함의 글</span>
-                    <strong>
-                      {articles.length}
-                      <small>편</small>
-                    </strong>
-                    <small>
-                      편집 완료{" "}
-                      {articles.filter((a) => a.editingCompletedAt).length}편
-                    </small>
-                  </div>
-                  <div className="stat-card">
-                    <CloudIcon />
-                    <span>공개한 글</span>
-                    <strong>
-                      {articles.filter((a) => a.status === "published").length}
-                      <small>편</small>
-                    </strong>
-                    <small>Ghost에 발행한 기록</small>
-                  </div>
-                </div>
-                <div className="section-heading">
-                  <h2>최근 프로젝트</h2>
-                  <button
-                    className="text-button"
-                    onClick={() => navigate("projects")}
-                  >
-                    모두 보기 <ArrowRight size={15} />
-                  </button>
-                </div>
-                <ProjectGrid
-                  projects={projects.slice(0, 3)}
-                  onOpen={loadProject}
-                  onNew={() => setNewProject(true)}
-                />
-                <div className="onboarding-strip">
-                  <Terminal size={24} />
-                  <div>
-                    <strong>VS Code에서 풀이를 기록하세요</strong>
-                    <p>
-                      확장 연결 → 기록 시작 → 통합 터미널에서 실행 → 초안 만들기
-                    </p>
-                  </div>
-                  <button
-                    className="text-button"
-                    onClick={() => navigate("settings")}
-                  >
-                    연결 안내 <ArrowUpRight size={15} />
-                  </button>
-                </div>
-              </>
-            )}
-            {view === "projects" &&
-              (detail ? (
-                <>
-                  <button
-                    className="text-button back-link"
-                    onClick={() => setDetail(null)}
-                  >
-                    ← 세션 목록
-                  </button>
-                  <Timeline
-                    key={detail.session.id}
-                    detail={detail}
-                    initialFile={linkedFile}
-                    onGenerate={(fileId) =>
-                      void startJob({
-                        kind: "generate",
-                        sessionId: detail.session.id,
-                        ...(fileId ? { fileId } : {}),
-                      })
-                    }
-                    onRefresh={() => void loadSession(detail.session.id)}
-                    onDelete={() => {
-                      setDetail(null);
-                      if (project) void loadProject(project);
-                    }}
-                    notify={notify}
-                  />
-                </>
-              ) : project ? (
-                <>
-                  <div className="page-heading heading-row">
-                    <div>
-                      <button
-                        className="text-button back-link"
-                        onClick={() => setProject(null)}
-                      >
-                        ← 모든 프로젝트
-                      </button>
-                      <h1>{project.name}</h1>
-                      <p className="mono muted">
-                        {project.rootPath ||
-                          "확장에서 작업 폴더를 연결해 주세요."}
-                      </p>
-                    </div>
-                    <div className="actions">
+                <PageHead
+                  back={{ label: "풀이 기록", onClick: () => setProject(null) }}
+                  title={
+                    <>
+                      {project.name}
+                      {project.excluded && (
+                        <Badge tone="amber">수집 제외</Badge>
+                      )}
+                    </>
+                  }
+                  actions={
+                    <>
                       <button
                         className="button subtle"
                         onClick={async () => {
@@ -828,40 +790,52 @@ export default function Workspace() {
                         aria-label="프로젝트 삭제"
                         onClick={deleteProject}
                       >
-                        <Trash2 size={17} />
+                        <Trash2 size={16} />
                       </button>
-                    </div>
-                  </div>
-                  <div className="card exclude-settings">
-                    <label>
-                      수집 제외 패턴{" "}
-                      <span className="field-hint">한 줄에 하나씩 입력</span>
-                      <textarea
-                        defaultValue={(project.excludePatterns || []).join(
-                          "\n",
-                        )}
-                        onBlur={async (e) => {
-                          try {
-                            const updated = await patch<Project>(
-                              `/projects/${project.id}`,
-                              {
-                                excludePatterns: e.target.value
-                                  .split("\n")
-                                  .map((s) => s.trim())
-                                  .filter(Boolean),
-                              },
-                            );
-                            setProject(updated);
-                          } catch (error) {
-                            notify(errorMessage(error), true);
-                          }
-                        }}
-                        placeholder="private/**&#10;**/secret.cpp"
-                        rows={2}
-                      />
-                    </label>
-                  </div>
-                  <div className="section-heading">
+                    </>
+                  }
+                >
+                  <p className="mono path">
+                    {project.rootPath || "확장에서 작업 폴더를 연결해 주세요."}
+                  </p>
+                </PageHead>
+                <details className="disclosure">
+                  <summary>
+                    수집 제외 패턴
+                    <Badge>{(project.excludePatterns || []).length}</Badge>
+                    <span className="field-hint">
+                      일치하는 파일은 기록하지 않습니다
+                    </span>
+                  </summary>
+                  <label>
+                    제외할 경로 패턴{" "}
+                    <span className="field-hint">한 줄에 하나씩 입력</span>
+                    <textarea
+                      key={project.id}
+                      defaultValue={(project.excludePatterns || []).join("\n")}
+                      onBlur={async (e) => {
+                        try {
+                          const updated = await patch<Project>(
+                            `/projects/${project.id}`,
+                            {
+                              excludePatterns: e.target.value
+                                .split("\n")
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            },
+                          );
+                          setProject(updated);
+                        } catch (error) {
+                          notify(errorMessage(error), true);
+                        }
+                      }}
+                      placeholder={"private/**\n**/secret.cpp"}
+                      rows={3}
+                    />
+                  </label>
+                </details>
+                <section className="panel">
+                  <header className="panel-head">
                     <h2>
                       풀이 세션 <Badge>{sessions.length}</Badge>
                     </h2>
@@ -869,182 +843,152 @@ export default function Workspace() {
                       className="text-button"
                       onClick={() => void loadProject(project)}
                     >
-                      <RefreshCw size={14} />
+                      <RefreshCw size={13} />
                       새로고침
                     </button>
-                  </div>
+                  </header>
                   {sessions.length ? (
-                    <div className="session-list">
+                    <ul className="row-list">
                       {sessions.map((session, index) => (
-                        <button
-                          key={session.id}
-                          className="card session-row"
-                          onClick={() => void loadSession(session.id)}
-                        >
-                          <span className="session-icon">
-                            <Terminal size={20} />
-                          </span>
-                          <span>
-                            <strong>풀이 세션 {sessions.length - index}</strong>
-                            <small>{date(session.startedAt)}</small>
-                          </span>
-                          <Badge tone={session.endedAt ? "neutral" : "green"}>
-                            {session.endedAt ? "기록 종료" : "기록 중"}
-                          </Badge>
-                          <ChevronRight size={18} />
-                        </button>
+                        <li key={session.id}>
+                          <button
+                            className="row"
+                            onClick={() => void loadSession(session.id)}
+                          >
+                            <span className="row-icon">
+                              <Terminal size={15} />
+                            </span>
+                            <span className="row-main">
+                              <strong>풀이 세션 {sessions.length - index}</strong>
+                              <small>{date(session.startedAt)} 시작</small>
+                            </span>
+                            <Badge tone={session.endedAt ? "neutral" : "green"}>
+                              {session.endedAt ? "기록 종료" : "기록 중"}
+                            </Badge>
+                            <ChevronRight size={16} className="row-chevron" />
+                          </button>
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   ) : (
-                    <Empty
-                      icon={<Terminal />}
-                      title="첫 풀이를 기다리고 있어요"
-                    >
+                    <Empty compact icon={<Terminal />} title="첫 풀이를 기다리고 있어요">
                       VS Code 확장에서 이 프로젝트를 선택하고 기록을 시작해
                       주세요.
                     </Empty>
                   )}
-                </>
-              ) : (
-                <>
-                  <div className="page-heading heading-row">
-                    <div>
-                      <div className="eyebrow">YOUR CODING JOURNEY</div>
-                      <h1>풀이 기록</h1>
-                      <p>프로젝트를 열어 코드가 바뀌어 온 과정을 살펴보세요.</p>
-                    </div>
-                    <button
-                      className="button primary"
-                      onClick={() => setNewProject(true)}
-                    >
-                      <Plus size={16} />새 프로젝트
-                    </button>
-                  </div>
-                  <ProjectGrid
-                    projects={projects}
-                    onOpen={loadProject}
-                    onNew={() => setNewProject(true)}
-                  />
-                </>
-              ))}
-            {view === "articles" && (
+                </section>
+              </>
+            ) : (
               <>
-                <div className="page-heading heading-row">
-                  <div>
-                    <div className="eyebrow">COLLECTED STORIES</div>
-                    <h1>글 보관함</h1>
-                    <p>기록에서 시작해, 내 언어로 완성한 이야기들.</p>
-                  </div>
-                  <div className="search">
-                    <Search size={17} />
-                    <input
-                      aria-label="글 검색"
-                      placeholder="글 제목 검색"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
-                </div>
-                {articles.filter((a) =>
-                  a.title.toLowerCase().includes(search.toLowerCase()),
-                ).length ? (
-                  <div className="article-grid">
-                    {articles
-                      .filter((a) =>
-                        a.title.toLowerCase().includes(search.toLowerCase()),
-                      )
-                      .map((a, index) => (
-                        <article key={a.id} className="card article-card">
-                          <button
-                            className="article-open"
-                            onClick={() => void openArticle(a.id)}
-                          >
-                            <div className={`article-cover cover-${index % 3}`}>
-                              <Code2 size={32} />
-                              <span>{String(index + 1).padStart(2, "0")}</span>
-                            </div>
-                            <div className="article-card-body">
-                              <Badge
-                                tone={
-                                  a.status === "published" ? "green" : "neutral"
-                                }
-                              >
-                                {a.status === "published"
-                                  ? "공개"
-                                  : a.status === "draft"
-                                    ? "Ghost 초안"
-                                    : "내 보관함"}
-                              </Badge>
-                              {a.editingCompletedAt && (
-                                <Badge tone="green">편집 완료</Badge>
-                              )}
-                              <h2>{a.title || "제목 없는 글"}</h2>
-                              <p>
-                                {(a.blocks || [])
-                                  .find((b) => b.type === "paragraph")
-                                  ?.text.slice(0, 100) ||
-                                  "원본 기록을 보며 나의 풀이를 정리해 보세요."}
-                              </p>
-                              <footer>
-                                <span>{date(a.updatedAt)}</span>
-                                <ArrowUpRight size={16} />
-                              </footer>
-                            </div>
-                          </button>
-                          <button
-                            className="article-delete icon-button danger"
-                            aria-label={`${a.title} 삭제`}
-                            onClick={async () => {
-                              if (!confirm("보관함에서 이 글을 삭제할까요?"))
-                                return;
-                              try {
-                                await api(`/articles/${a.id}`, {
-                                  method: "DELETE",
-                                });
-                                await refresh();
-                              } catch (e) {
-                                notify(errorMessage(e), true);
-                              }
-                            }}
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </article>
-                      ))}
-                  </div>
+                <PageHead
+                  title="풀이 기록"
+                  description="프로젝트를 열어 코드가 바뀌어 온 과정을 살펴보세요."
+                  actions={newProjectButton}
+                />
+                {projects.length ? (
+                  <section className="panel">
+                    <ProjectList projects={projects} onOpen={loadProject} />
+                  </section>
                 ) : (
                   <Empty
-                    icon={<BookOpen size={30} />}
-                    title="첫 번째 이야기를 만들어 볼까요?"
+                    icon={<FolderOpen />}
+                    title="아직 프로젝트가 없어요"
                     action={
-                      <button
-                        className="button primary"
-                        onClick={() => navigate("projects")}
-                      >
-                        풀이 기록 열기 <ArrowRight size={15} />
-                      </button>
+                      <div className="actions">
+                        {newProjectButton}
+                        <button
+                          className="button subtle"
+                          onClick={sample}
+                          disabled={busy}
+                        >
+                          샘플로 둘러보기
+                        </button>
+                      </div>
                     }
                   >
-                    풀이 세션에서 ‘초안 만들기’를 누르면 여기에 글이 생깁니다.
+                    기록할 작업 폴더마다 프로젝트를 하나씩 만드세요.
                   </Empty>
                 )}
               </>
-            )}
-            {view === "settings" && (
-              <Settings user={user} notify={notify} onLogout={logout} />
-            )}
-            {view === "admin" && user.role === "admin" && (
-              <Admin notify={notify} />
-            )}
-            <footer className="page-footer">
-              <span>풀이의 기록 · 과정에 의미를 더하다</span>
-              <a href="/privacy" target="_blank">
-                데이터와 개인정보
-              </a>
-            </footer>
-          </main>
-        )}
-      </div>
+            ))}
+          {view === "articles" && (
+            <>
+              <PageHead
+                title="글 보관함"
+                description="기록에서 시작해, 내 언어로 완성한 이야기들."
+              />
+              {articles.length ? (
+                <>
+                  <div className="list-toolbar">
+                    <div className="chips" role="group" aria-label="글 상태">
+                      {articleFilters.map((f) => (
+                        <button
+                          key={f.id}
+                          className={activeFilter.id === f.id ? "active" : ""}
+                          aria-pressed={activeFilter.id === f.id}
+                          onClick={() => setArticleFilter(f.id)}
+                        >
+                          {f.label}
+                          <small>{articles.filter(f.match).length}</small>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="search">
+                      <Search size={15} />
+                      <input
+                        aria-label="글 검색"
+                        placeholder="글 제목 검색"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {visibleArticles.length ? (
+                    <section className="panel">
+                      <ArticleList
+                        articles={visibleArticles}
+                        onOpen={(id) => void openArticle(id)}
+                        onDelete={(a) => void deleteArticle(a)}
+                      />
+                    </section>
+                  ) : (
+                    <Empty compact title="조건에 맞는 글이 없어요">
+                      다른 상태를 고르거나 검색어를 바꿔 보세요.
+                    </Empty>
+                  )}
+                </>
+              ) : (
+                <Empty
+                  icon={<BookOpen size={26} />}
+                  title="첫 번째 이야기를 만들어 볼까요?"
+                  action={
+                    <button
+                      className="button primary"
+                      onClick={() => navigate("projects")}
+                    >
+                      풀이 기록 열기 <ArrowRight size={15} />
+                    </button>
+                  }
+                >
+                  풀이 세션에서 ‘초안 만들기’를 누르면 여기에 글이 생깁니다.
+                </Empty>
+              )}
+            </>
+          )}
+          {view === "settings" && (
+            <Settings user={user} notify={notify} onLogout={logout} />
+          )}
+          {view === "admin" && user.role === "admin" && (
+            <Admin notify={notify} />
+          )}
+          <footer className="page-footer">
+            <span>풀이의 기록 · 과정에 의미를 더하다</span>
+            <a href="/privacy" target="_blank">
+              데이터와 개인정보
+            </a>
+          </footer>
+        </main>
+      )}
       {newProject && (
         <Modal title="새 프로젝트" onClose={() => setNewProject(false)}>
           <form onSubmit={createProject}>
@@ -1071,7 +1015,7 @@ export default function Workspace() {
               수행합니다.
             </p>
             <button className="button primary">
-              <Plus size={16} />
+              <Plus size={15} />
               프로젝트 만들기
             </button>
           </form>
@@ -1083,7 +1027,7 @@ export default function Workspace() {
             {jobs.length ? (
               jobs.map((job) => (
                 <div key={job.id} className="job-row">
-                  <div>
+                  <div className="job-main">
                     <strong>{jobLabels[job.kind] || job.kind}</strong>
                     <small>{date(job.createdAt)}</small>
                   </div>
@@ -1098,17 +1042,6 @@ export default function Workspace() {
                   >
                     {statusLabels[job.status] || job.status}
                   </Badge>
-                  <div className="job-progress">
-                    <i
-                      style={{
-                        width: `${job.progress <= 1 ? job.progress * 100 : job.progress}%`,
-                      }}
-                    />
-                  </div>
-                  {job.error && <p className="danger">{job.error}</p>}
-                  {job.kind === "generate" && job.stream?.text && (
-                    <LiveDraft job={job} />
-                  )}
                   <div className="actions">
                     {["queued", "running"].includes(job.status) && (
                       <button
@@ -1147,25 +1080,26 @@ export default function Workspace() {
                       </button>
                     )}
                   </div>
+                  {["queued", "running"].includes(job.status) && (
+                    <div className="job-progress">
+                      <i
+                        style={{
+                          width: `${job.progress <= 1 ? job.progress * 100 : job.progress}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {job.error && <p className="danger">{job.error}</p>}
+                  {job.kind === "generate" && job.stream?.text && (
+                    <LiveDraft job={job} />
+                  )}
                 </div>
               ))
             ) : (
-              <Empty title="아직 진행한 작업이 없어요" />
+              <Empty compact title="아직 진행한 작업이 없어요" />
             )}
           </div>
         </Modal>
-      )}
-      {!!activeJobs.length && !jobDrawer && (
-        <button className="active-job" onClick={() => setJobDrawer(true)}>
-          <Spinner />
-          <span>
-            {jobLabels[activeJobs[0].kind] || "작업"} 진행 중{" "}
-            <small>
-              {activeJobs.length > 1 ? `외 ${activeJobs.length - 1}개` : ""}
-            </small>
-          </span>
-          <ChevronRight size={16} />
-        </button>
       )}
       {toast && (
         <Toast
@@ -1179,54 +1113,172 @@ export default function Workspace() {
 }
 function ActivityIcon() {
   return (
-    <span className="activity-icon">
+    <span className="activity-icon" aria-hidden="true">
       <i />
       <i />
       <i />
     </span>
   );
 }
-function CloudIcon() {
-  return <ArrowUpRight />;
+function ProfileMenu({
+  user,
+  used,
+  limit,
+  onSettings,
+  onLogout,
+}: {
+  user: User;
+  used: number;
+  limit: number;
+  onSettings: () => void;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div className="profile" ref={ref}>
+      <button
+        className="avatar-button"
+        aria-label="계정 메뉴"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="avatar">{user.email[0].toUpperCase()}</span>
+      </button>
+      {open && (
+        <div className="profile-menu">
+          <div className="profile-id">
+            <strong>{user.email}</strong>
+            <small>{user.role === "admin" ? "관리자 계정" : "개인 계정"}</small>
+          </div>
+          <div className="usage">
+            <span>이번 달 AI 사용량</span>
+            <strong>
+              {money(used)} <small>/ ${limit}</small>
+            </strong>
+            <div className="usage-track">
+              <i style={{ width: `${Math.min(100, (used / limit) * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onSettings();
+            }}
+          >
+            <Settings2 size={15} />
+            연결과 데이터
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+          >
+            <LogOut size={15} />
+            로그아웃
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
-function ProjectGrid({
+function ProjectList({
   projects,
   onOpen,
-  onNew,
 }: {
   projects: Project[];
   onOpen: (p: Project) => void;
-  onNew: () => void;
 }) {
   return (
-    <div className="project-grid">
-      {projects.map((p, index) => (
-        <button
-          key={p.id}
-          className="card project-card"
-          onClick={() => onOpen(p)}
-        >
-          <span className={`project-icon color-${index % 3}`}>
-            <FolderOpen size={23} />
-          </span>
-          <div>
-            <h3>{p.name}</h3>
-            <p>{p.rootPath || "코드와 시도를 모으는 공간"}</p>
-          </div>
-          <footer>
-            <span>{p.excluded ? "수집 제외" : ".c · .cpp · .py"}</span>
-            <ArrowUpRight size={16} />
-          </footer>
-        </button>
+    <ul className="row-list">
+      {projects.map((p) => (
+        <li key={p.id}>
+          <button className="row" onClick={() => onOpen(p)}>
+            <span className="row-icon">
+              <FolderOpen size={15} />
+            </span>
+            <span className="row-main">
+              <strong>{p.name}</strong>
+              <small className="mono">
+                {p.rootPath || "작업 폴더 미연결"}
+              </small>
+            </span>
+            {p.excluded ? (
+              <Badge tone="amber">수집 제외</Badge>
+            ) : (
+              p.createdAt && <span className="row-meta">{date(p.createdAt)}</span>
+            )}
+            <ChevronRight size={16} className="row-chevron" />
+          </button>
+        </li>
       ))}
-      <button className="project-create" onClick={onNew}>
-        <span>
-          <Plus size={22} />
-        </span>
-        <strong>새 프로젝트 만들기</strong>
-        <small>다음 풀이를 담을 공간</small>
-      </button>
-    </div>
+    </ul>
+  );
+}
+function ArticleList({
+  articles,
+  onOpen,
+  onDelete,
+}: {
+  articles: Article[];
+  onOpen: (id: string) => void;
+  onDelete?: (article: Article) => void;
+}) {
+  return (
+    <ul className="row-list">
+      {articles.map((a) => (
+        <li key={a.id} className="row article-row">
+          <span className="row-icon">
+            <FileText size={15} />
+          </span>
+          <div className="row-main">
+            <h3>
+              <button className="row-link" onClick={() => onOpen(a.id)}>
+                {a.title || "제목 없는 글"}
+              </button>
+            </h3>
+            <small>
+              {(a.blocks || [])
+                .find((b) => b.type === "paragraph")
+                ?.text.slice(0, 120) ||
+                "원본 기록을 보며 나의 풀이를 정리해 보세요."}
+            </small>
+          </div>
+          <span className="row-badges">
+            <Badge tone={a.status === "published" ? "green" : "neutral"}>
+              {articleStatusLabel(a.status)}
+            </Badge>
+            {a.editingCompletedAt && <Badge tone="green">편집 완료</Badge>}
+          </span>
+          <span className="row-meta">{date(a.updatedAt)}</span>
+          {onDelete && (
+            <button
+              className="icon-button danger row-action"
+              aria-label={`${a.title} 삭제`}
+              onClick={() => onDelete(a)}
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 function Login({
@@ -1277,51 +1329,52 @@ function Login({
       <section className="login-story">
         <div className="brand">
           <span className="brand-mark">
-            <Braces size={25} />
+            <Braces size={17} />
           </span>
-          <span>
-            풀이의 기록<small>AUTOBLOGGER</small>
-          </span>
+          <span className="brand-name">풀이의 기록</span>
         </div>
         <div className="login-headline">
-          <div className="eyebrow">EVERY ATTEMPT TELLS A STORY</div>
           <h1>
             코드는 답을 남기고,
             <br />
-            기록은 <em>과정</em>을 남깁니다.
+            기록은 과정을 남깁니다.
           </h1>
           <p>
-            실패한 실행도, 작은 수정도.
-            <br />
-            나만의 배움으로 이어지는 한 편의 풀이 기록.
+            실패한 실행도, 작은 수정도. 나만의 배움으로 이어지는 한 편의 풀이
+            기록.
           </p>
-          <div className="login-path">
-            <span>
-              <Terminal size={20} />
-              기록
-            </span>
-            <i />
-            <span>
-              <Sparkles size={20} />
-              초안
-            </span>
-            <i />
-            <span>
-              <BookOpen size={20} />
-              발행
-            </span>
-          </div>
+          <ol className="login-path">
+            <li>
+              <Terminal size={17} />
+              <span>
+                <strong>기록</strong>
+                <small>VS Code에서 저장·실행·메모</small>
+              </span>
+            </li>
+            <li>
+              <Sparkles size={17} />
+              <span>
+                <strong>초안</strong>
+                <small>근거가 연결된 글 생성</small>
+              </span>
+            </li>
+            <li>
+              <BookOpen size={17} />
+              <span>
+                <strong>발행</strong>
+                <small>편집 후 Ghost로 전송</small>
+              </span>
+            </li>
+          </ol>
         </div>
-        <p className="login-bottom">일상의 풀이를, 오래 남을 이야기로.</p>
       </section>
       <section className="login-form">
-        <div className="eyebrow">WELCOME TO YOUR WORKSPACE</div>
         <h2>나의 기록을 시작하세요</h2>
         <p className="muted">한 번의 풀이에서 한 편의 글까지.</p>
         {isLocal ? (
           <form onSubmit={local}>
             <div className="notice">
-              <ShieldCheck size={17} />
+              <ShieldCheck size={16} />
               <span>
                 로컬 개발 모드입니다. 실제 계정의 비밀번호는 입력하지 않습니다.
               </span>
@@ -1341,7 +1394,7 @@ function Login({
                 <Spinner />
               ) : (
                 <>
-                  작업 공간 열기 <ArrowRight size={17} />
+                  작업 공간 열기 <ArrowRight size={16} />
                 </>
               )}
             </button>
@@ -1366,12 +1419,11 @@ function Login({
             disabled={busy}
             onClick={oauth}
           >
-            GitHub 계정으로 로그인 <ArrowRight size={17} />
+            GitHub 계정으로 로그인 <ArrowRight size={16} />
           </button>
         )}
         <p className="login-policy">
-          사용하는 데이터는 직접 관리할 수 있습니다.
-          <br />
+          사용하는 데이터는 직접 관리할 수 있습니다.{" "}
           <a href="/privacy">데이터 수집 및 보관 안내</a>
         </p>
       </section>
@@ -1423,7 +1475,7 @@ function ConnectBanner({
   }
   return (
     <div className="connect-banner">
-      <Link2 size={24} />
+      <Link2 size={20} />
       <div>
         <strong>VS Code 확장을 이 계정에 연결할까요?</strong>
         <p>
@@ -1445,7 +1497,7 @@ function LiveDraft({ job }: { job: Job }) {
   const draft = draftPreview(job.stream?.text || "");
   return (
     <section className="live-draft" aria-label="작성 중인 초안">
-      <div className="eyebrow">
+      <div className="live-draft-label">
         {job.status === "completed" ? "생성된 초안" : "작성 중인 초안"} · 근거
         검토 전
       </div>

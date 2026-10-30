@@ -1,17 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-  Activity,
-  ArrowUpRight,
-  Coins,
-  RefreshCw,
-  Settings2,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
+import { RefreshCw, Settings2, ShieldCheck } from "lucide-react";
 import type { AdminData, User, Job } from "@/lib/types";
 import { api, patch, post, money, date, errorMessage } from "@/lib/api";
-import { Badge, Empty, jobLabels, statusLabels } from "./ui";
+import {
+  Badge,
+  Empty,
+  PageHead,
+  ShowMore,
+  StatStrip,
+  jobLabels,
+  statusLabels,
+} from "./ui";
 export default function Admin({
   notify,
 }: {
@@ -21,7 +21,10 @@ export default function Admin({
     [model, setModel] = useState("openai/gpt-6.1-terra"),
     [provider, setProvider] = useState("Azure"),
     [signupPaused, setSignupPaused] = useState(false),
-    [loading, setLoading] = useState(false);
+    [loading, setLoading] = useState(false),
+    [allJobs, setAllJobs] = useState(false),
+    [allRuns, setAllRuns] = useState(false),
+    [allUsers, setAllUsers] = useState(false);
   async function refresh() {
     setLoading(true);
     try {
@@ -74,58 +77,41 @@ export default function Admin({
     credit = data?.credit || {};
   return (
     <section className="admin-page">
-      <div className="page-heading heading-row">
-        <div>
-          <div className="eyebrow">ADMINISTRATION</div>
-          <h1>운영 현황</h1>
-          <p>사용량과 작업 상태를 확인하고 AI 설정을 관리하세요.</p>
-        </div>
-        <button className="button subtle" onClick={refresh} disabled={loading}>
-          <RefreshCw size={16} className={loading ? "spin" : ""} />
-          새로고침
-        </button>
-      </div>
-      <div className="stat-grid">
-        <div className="stat-card">
-          <Coins />
-          <span>기록된 AI 비용</span>
-          <strong>{money(cost)}</strong>
-          <small>{data?.modelRuns.length || 0}회 모델 호출</small>
-        </div>
-        <div className="stat-card">
-          <Users />
-          <span>사용자</span>
-          <strong>
-            {data?.users.length || 0}
-            <small>명</small>
-          </strong>
-          <small>계정별 사용량 관리</small>
-        </div>
-        <div className="stat-card">
-          <Activity />
-          <span>실패 작업</span>
-          <strong>
-            {data?.jobs.filter((j) => j.status === "failed").length || 0}
-            <small>건</small>
-          </strong>
-          <small>원본을 보존하고 재시도</small>
-        </div>
-      </div>
-      <section className="card completion-metric">
-        <div>
-          <strong>기록이 완성된 글로 이어진 비율</strong>
-          <p>
-            Ghost에 발행하지 않고 내 보관함에서 편집을 완료한 글도 포함합니다.
-          </p>
-        </div>
-        <span>
-          <b>{Math.round(Number(data?.metrics?.completionRate || 0) * 100)}%</b>
-          <small>
-            {Number(data?.metrics?.completedSessions || 0)} /{" "}
-            {Number(data?.metrics?.recordedSessions || 0)}개 세션
-          </small>
-        </span>
-      </section>
+      <PageHead
+        title="운영 현황"
+        description="사용량과 작업 상태를 확인하고 AI 설정을 관리하세요."
+        actions={
+          <button
+            className="button subtle"
+            onClick={refresh}
+            disabled={loading}
+          >
+            <RefreshCw size={15} className={loading ? "spin" : ""} />
+            새로고침
+          </button>
+        }
+      />
+      <StatStrip
+        items={[
+          {
+            label: "기록된 AI 비용",
+            value: money(cost),
+            hint: `${data?.modelRuns.length || 0}회 모델 호출`,
+          },
+          { label: "사용자", value: data?.users.length || 0, unit: "명" },
+          {
+            label: "실패 작업",
+            value: data?.jobs.filter((j) => j.status === "failed").length || 0,
+            unit: "건",
+            hint: "원본을 보존하고 재시도",
+          },
+          {
+            label: "기록이 완성된 글로 이어진 비율",
+            value: `${Math.round(Number(data?.metrics?.completionRate || 0) * 100)}%`,
+            hint: `${Number(data?.metrics?.completedSessions || 0)} / ${Number(data?.metrics?.recordedSessions || 0)}개 세션 · 보관함 편집 완료 포함`,
+          },
+        ]}
+      />
       {!!data?.alerts?.length && (
         <div className="notice warning">
           {data.alerts.map((alert, i) => (
@@ -138,7 +124,7 @@ export default function Admin({
       <div className="settings-grid">
         <section className="card settings-card">
           <div className="card-title">
-            <Settings2 size={20} />
+            <Settings2 size={18} />
             <h2>AI 모델과 provider</h2>
           </div>
           <form onSubmit={saveSettings}>
@@ -179,7 +165,7 @@ export default function Admin({
         </section>
         <section className="card settings-card">
           <div className="card-title">
-            <ShieldCheck size={20} />
+            <ShieldCheck size={18} />
             <h2>키 사용 한도</h2>
           </div>
           <dl className="key-stats">
@@ -240,6 +226,7 @@ export default function Admin({
       <section className="card table-card">
         <div className="card-title">
           <h2>사용자별 사용량과 상한</h2>
+          <Badge>{data?.users.length || 0}</Badge>
         </div>
         <div className="table-scroll">
           <table>
@@ -254,11 +241,20 @@ export default function Admin({
               </tr>
             </thead>
             <tbody>
-              {data?.users.map((user) => (
+              {(allUsers
+                ? data?.users || []
+                : (data?.users || []).slice(0, 8)
+              ).map((user) => (
                 <UserLimits key={user.id} user={user} onSave={limits} />
               ))}
             </tbody>
           </table>
+          <ShowMore
+            total={data?.users.length || 0}
+            limit={8}
+            expanded={allUsers}
+            onToggle={() => setAllUsers(!allUsers)}
+          />
         </div>
       </section>
       <section className="card table-card">
@@ -279,7 +275,7 @@ export default function Admin({
                 </tr>
               </thead>
               <tbody>
-                {data.jobs.map((job) => (
+                {(allJobs ? data.jobs : data.jobs.slice(0, 8)).map((job) => (
                   <tr key={job.id}>
                     <td>{jobLabels[job.kind] || job.kind}</td>
                     <td>
@@ -311,47 +307,67 @@ export default function Admin({
                 ))}
               </tbody>
             </table>
+            <ShowMore
+              total={data.jobs.length}
+              limit={8}
+              expanded={allJobs}
+              onToggle={() => setAllJobs(!allJobs)}
+            />
           </div>
         ) : (
-          <Empty title="등록된 작업이 없습니다" />
+          <Empty compact title="등록된 작업이 없습니다" />
         )}
       </section>
       <section className="card table-card">
         <div className="card-title">
           <h2>모델 호출 기록</h2>
+          <Badge>{data?.modelRuns.length || 0}</Badge>
         </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>모델 / provider</th>
-                <th>프롬프트</th>
-                <th>비용</th>
-                <th>지연</th>
-                <th>시각</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.modelRuns.map((run, i) => (
-                <tr key={String(run.id || i)}>
-                  <td>
-                    {String(run.model || run.modelId || "—")}
-                    <small>{String(run.provider || "—")}</small>
-                  </td>
-                  <td>{String(run.promptVersion || "—")}</td>
-                  <td>{money(run.cost)}</td>
-                  <td>
-                    {Number(
-                      run.durationMs || run.latencyMs || 0,
-                    ).toLocaleString()}
-                    ms
-                  </td>
-                  <td>{date(String(run.createdAt || ""))}</td>
+        {data?.modelRuns.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>모델 / provider</th>
+                  <th>프롬프트</th>
+                  <th>비용</th>
+                  <th>지연</th>
+                  <th>시각</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(allRuns
+                  ? data?.modelRuns || []
+                  : (data?.modelRuns || []).slice(0, 8)
+                ).map((run, i) => (
+                  <tr key={String(run.id || i)}>
+                    <td>
+                      {String(run.model || run.modelId || "—")}
+                      <small>{String(run.provider || "—")}</small>
+                    </td>
+                    <td>{String(run.promptVersion || "—")}</td>
+                    <td>{money(run.cost)}</td>
+                    <td>
+                      {Number(
+                        run.durationMs || run.latencyMs || 0,
+                      ).toLocaleString()}
+                      ms
+                    </td>
+                    <td>{date(String(run.createdAt || ""))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <ShowMore
+              total={data?.modelRuns.length || 0}
+              limit={8}
+              expanded={allRuns}
+              onToggle={() => setAllRuns(!allRuns)}
+            />
+          </div>
+        ) : (
+          <Empty compact title="모델 호출 기록이 없습니다" />
+        )}
       </section>
     </section>
   );

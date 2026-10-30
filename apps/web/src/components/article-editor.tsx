@@ -39,6 +39,7 @@ import {
   post,
   download,
   date,
+  time,
   ApiError,
   errorMessage,
   API_URL,
@@ -60,7 +61,14 @@ import type {
   SessionDetail,
   Job,
 } from "@/lib/types";
-import { Badge, Modal, Empty, Spinner, reviewLabels } from "./ui";
+import {
+  Badge,
+  Modal,
+  Empty,
+  Spinner,
+  articleStatusLabel,
+  reviewLabels,
+} from "./ui";
 import { EventDetail, eventName } from "./timeline";
 interface Props {
   article: Article;
@@ -819,15 +827,19 @@ export default function ArticleEditor({
             {events
               .filter((e) => !e.type.startsWith("session_"))
               .map((event, index) => (
-                <button key={event.id} onClick={() => addEvidence(event)}>
-                  <span>
-                    {eventName(event)} <small>{index + 1}</small>
-                  </span>
+                <button
+                  key={event.id}
+                  onClick={() => addEvidence(event)}
+                  title={`${eventName(event)} · ${date(event.occurredAt)} — 본문에 삽입`}
+                >
+                  <time dateTime={event.occurredAt}>
+                    {time(event.occurredAt).slice(0, 5)}
+                  </time>
+                  <span>{eventName(event)}</span>
                   <small>
-                    {event.filePath?.split(/[\\/]/).pop() ||
-                      date(event.occurredAt)}
+                    {event.filePath?.split(/[\\/]/).pop() || index + 1}
                   </small>
-                  <Plus size={14} />
+                  <Plus size={13} />
                 </button>
               ))}
           </div>
@@ -921,17 +933,15 @@ export default function ArticleEditor({
             />
           </div>
           <div className="article-paper">
-            <div className="eyebrow">
-              MY SOLUTION NOTE <span>·</span>{" "}
+            <div className="paper-status">
               <Badge
                 tone={article.status === "published" ? "green" : "neutral"}
               >
-                {article.status === "published"
-                  ? "공개"
-                  : article.status === "draft"
-                    ? "Ghost 초안"
-                    : "내 보관함"}
+                {articleStatusLabel(article.status)}
               </Badge>
+              {article.editingCompletedAt && (
+                <Badge tone="green">편집 완료</Badge>
+              )}
             </div>
             <input
               className="article-title"
@@ -945,9 +955,9 @@ export default function ArticleEditor({
               }}
             />
             <div className="article-meta">
-              {date(article.createdAt)}
-              <span>·</span>
-              {blocks.length}개 블록<span>·</span>원본 기록에 연결된 글
+              <span>{date(article.createdAt)} 생성</span>
+              <span>{blocks.length}개 블록</span>
+              <span>원본 기록에 연결된 글</span>
             </div>
             <EditorContent editor={editor} />
             {slash && (
@@ -998,7 +1008,7 @@ export default function ArticleEditor({
           {currentBlock ? (
             <>
               <div className="selected-block">
-                <div className="eyebrow">선택한 블록</div>
+                <div className="block-label">선택한 블록</div>
                 <p>{currentBlock.text.slice(0, 160) || "빈 블록"}</p>
                 <Badge
                   tone={currentBlock.review === "supported" ? "green" : "amber"}

@@ -110,6 +110,15 @@ export const date = (value?: string) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "—";
+export const time = (value?: string) =>
+  value
+    ? new Intl.DateTimeFormat("ko-KR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(value))
+    : "—";
 export const money = (value: unknown) => `$${Number(value || 0).toFixed(3)}`;
 export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
