@@ -30,6 +30,7 @@ import {
   patch,
   getToken,
   setToken,
+  ago,
   date,
   money,
   watchEvents,
@@ -707,22 +708,24 @@ export default function Workspace() {
                   )}
                 </section>
               </div>
-              <section className="steps" aria-label="VS Code에서 기록하는 순서">
-                <Terminal size={18} />
-                <strong>VS Code에서 풀이를 기록하세요</strong>
-                <ol>
-                  <li>확장 연결</li>
-                  <li>기록 시작</li>
-                  <li>통합 터미널에서 실행</li>
-                  <li>초안 만들기</li>
-                </ol>
-                <button
-                  className="text-button"
-                  onClick={() => navigate("settings")}
-                >
-                  연결 안내 <ArrowUpRight size={14} />
-                </button>
-              </section>
+              {!articles.length && (
+                <section className="steps" aria-label="VS Code에서 기록하는 순서">
+                  <Terminal size={18} />
+                  <strong>VS Code에서 풀이를 기록하세요</strong>
+                  <ol>
+                    <li>확장 연결</li>
+                    <li>기록 시작</li>
+                    <li>통합 터미널에서 실행</li>
+                    <li>초안 만들기</li>
+                  </ol>
+                  <button
+                    className="text-button"
+                    onClick={() => navigate("settings")}
+                  >
+                    연결 안내 <ArrowUpRight size={14} />
+                  </button>
+                </section>
+              )}
             </>
           )}
           {view === "projects" &&
@@ -737,6 +740,16 @@ export default function Workspace() {
                 }
                 backLabel={project?.name || "세션 목록"}
                 initialFile={linkedFile}
+                articles={articles.filter(
+                  (a) => a.sessionId === detail.session.id,
+                )}
+                usage={{
+                  day: Number(user.usage?.day || 0),
+                  dayLimit: user.dailyLimit ?? 3,
+                  month: usedThisMonth,
+                  monthLimit: monthlyLimit,
+                }}
+                onOpenArticle={(id) => void openArticle(id)}
                 onBack={() => setDetail(null)}
                 onGenerate={(fileId) =>
                   void startJob({
@@ -1222,7 +1235,11 @@ function ProjectList({
             {p.excluded ? (
               <Badge tone="amber">수집 제외</Badge>
             ) : (
-              p.createdAt && <span className="row-meta">{date(p.createdAt)}</span>
+              p.createdAt && (
+                <span className="row-meta" title={date(p.createdAt)}>
+                  {ago(p.createdAt)} 생성
+                </span>
+              )
             )}
             <ChevronRight size={16} className="row-chevron" />
           </button>
@@ -1266,7 +1283,9 @@ function ArticleList({
             </Badge>
             {a.editingCompletedAt && <Badge tone="green">편집 완료</Badge>}
           </span>
-          <span className="row-meta">{date(a.updatedAt)}</span>
+          <span className="row-meta" title={date(a.updatedAt)}>
+            {ago(a.updatedAt)} 수정
+          </span>
           {onDelete && (
             <button
               className="icon-button danger row-action"

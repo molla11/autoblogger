@@ -119,6 +119,17 @@ export const time = (value?: string) =>
         hourCycle: "h23",
       }).format(new Date(value))
     : "—";
+const relative = new Intl.RelativeTimeFormat("ko", { numeric: "auto" });
+export const ago = (value?: string) => {
+  if (!value) return "—";
+  const seconds = (Date.now() - new Date(value).getTime()) / 1000;
+  if (seconds < 60) return "방금";
+  if (seconds < 3600) return relative.format(-Math.round(seconds / 60), "minute");
+  if (seconds < 86400) return relative.format(-Math.round(seconds / 3600), "hour");
+  if (seconds < 86400 * 7)
+    return relative.format(-Math.round(seconds / 86400), "day");
+  return date(value);
+};
 export const money = (value: unknown) => `$${Number(value || 0).toFixed(3)}`;
 export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);

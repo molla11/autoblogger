@@ -88,3 +88,37 @@ test("article library filters by status and opens rows by their title", async ({
   await list.getByRole("heading", { name: "작성 중인 글", exact: true }).click();
   await expect(page.getByLabel("글 제목")).toHaveValue("작성 중인 글");
 });
+test("timeline shows what changed and drafting starts only after reviewing the input", async ({
+  page,
+  request,
+}) => {
+  const { token, sample } = await seed(request, "draft");
+  let jobRequests = 0;
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url() === API + "/jobs") jobRequests++;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page, token, `/?session=${sample.session.id}`);
+  const rows = page.locator(".event-row");
+  await expect(rows.first()).toContainText("첫 저장");
+  await expect(rows.filter({ hasText: "터미널 실행" }).first()).toContainText("-1");
+  await expect(rows.filter({ hasText: "터미널 실행" }).last()).toContainText(
+    "결과 변화",
+  );
+  await rows.filter({ hasText: "코드 수정" }).click();
+  const pane = page.locator("#event-pane");
+  await expect(pane.locator(".code-diff tr.del")).toContainText("a-b");
+  await expect(pane.locator(".code-diff tr.add")).toContainText("a+b");
+  await page.getByRole("button", { name: /^실행 2:/ }).click();
+  await expect(pane).toContainText("5");
+  await page.getByRole("button", { name: "초안 만들기", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "초안 만들기" });
+  await expect(sheet).toContainText("사건 6개 · 코드 변경 3 · 실행 2 · 메모 1");
+  await expect(sheet.getByRole("textbox")).toHaveValue("");
+  await expect(
+    sheet.getByRole("button", { name: "초안 생성 시작", exact: true }),
+  ).toBeEnabled();
+  await sheet.getByRole("button", { name: "취소", exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+  expect(jobRequests).toBe(0);
+});

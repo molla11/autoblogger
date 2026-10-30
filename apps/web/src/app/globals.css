@@ -1484,6 +1484,226 @@ button.row:hover,
 .choice-list .button {
   justify-content: flex-start;
 }
+.meta-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--brand-ink);
+  font-weight: 500;
+  border-radius: var(--radius-s);
+}
+.meta-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.run-flow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.run-flow > span {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.run-flow ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.run-dot {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.run-dot.changed {
+  background: var(--warn-soft);
+  border-color: #e3c37a;
+  color: var(--warn);
+}
+.run-dot.red {
+  background: var(--danger-soft);
+  border-color: #efc3b8;
+  color: var(--danger);
+}
+.run-dot.on {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--brand);
+}
+.event-item.run.red .event-mark {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.detail-note.first {
+  margin: 0 0 8px;
+}
+.code-diff {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-height: 460px;
+  overflow: auto;
+}
+.code-diff table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+.code-diff td {
+  padding: 0 8px;
+  border-bottom: 0;
+  vertical-align: top;
+}
+.code-diff .ln {
+  width: 1%;
+  min-width: 34px;
+  text-align: right;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-right: 1px solid var(--line);
+  user-select: none;
+  white-space: nowrap;
+}
+.code-diff .src {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.code-diff .sign {
+  display: inline-block;
+  width: 1.4em;
+  color: var(--muted);
+  user-select: none;
+}
+.code-diff tr.add .src {
+  background: var(--ok-soft);
+}
+.code-diff tr.add .ln {
+  background: #d7eadd;
+}
+.code-diff tr.add .sign {
+  color: var(--ok);
+}
+.code-diff tr.del .src {
+  background: var(--danger-soft);
+}
+.code-diff tr.del .ln {
+  background: #f5dbd4;
+}
+.code-diff tr.del .sign {
+  color: var(--danger);
+}
+.code-diff tr.gap td {
+  background: var(--surface-2);
+  text-align: center;
+  border-block: 1px solid var(--line);
+}
+.code-diff tr.gap button {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand-ink);
+  padding: 2px 8px;
+}
+.code-diff tr.gap button:hover {
+  text-decoration: underline;
+}
+.raw-diff .add {
+  color: var(--ok);
+}
+.raw-diff .del {
+  color: var(--danger);
+}
+.event-detail > .code-diff + details {
+  margin-top: 10px;
+}
+.draft-sheet {
+  display: grid;
+  gap: 14px;
+}
+.draft-sheet .notice {
+  margin: 0;
+}
+.file-choice {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  padding: 6px 12px 8px;
+  margin: 0;
+}
+.file-choice legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  padding: 0 4px;
+}
+.file-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+}
+.file-choice input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brand);
+}
+.sheet-block {
+  margin: 0;
+}
+.sheet-block h3 {
+  font-size: 13px;
+  margin: 0 0 2px;
+}
+.sheet-block p {
+  margin: 0;
+}
+.sheet-block .field-hint.below {
+  display: block;
+  margin-top: 4px;
+}
+.draft-sheet .notice button {
+  white-space: nowrap;
+  margin-left: auto;
+}
+.sheet-footer .actions {
+  margin-left: auto;
+}
+.sheet-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.sheet-footer > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.evidence-card .code-diff table {
+  font-size: 11px;
+}
 /* Settings and admin */
 .settings-grid {
   display: grid;

@@ -12,8 +12,9 @@ test("actual Azure draft streams into editor and background review does not conf
   await page.goto("/");
   await page.getByRole("button", { name: "작업 공간 열기" }).click();
   await page.getByRole("button", { name: "샘플로 둘러보기" }).click();
-  const started = Date.now();
   await page.getByRole("button", { name: "초안 만들기", exact: true }).click();
+  const started = Date.now();
+  await page.getByRole("button", { name: "초안 생성 시작", exact: true }).click();
   await expect(page.getByLabel("글 제목")).toBeVisible({ timeout: 120000 });
   const dialog = page.getByRole("dialog");
   if (await dialog.isVisible())

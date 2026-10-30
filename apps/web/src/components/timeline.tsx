@@ -2,6 +2,7 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   FileCode2,
+  FileText,
   Terminal,
   MessageSquare,
   Bookmark,
@@ -16,9 +17,22 @@ import {
   ShieldCheck,
   NotebookPen,
 } from "lucide-react";
-import { api, patch, download, date, time } from "@/lib/api";
-import type { RecordEvent, SessionDetail } from "@/lib/types";
-import { Badge, Empty, Modal, PageHead, useMediaQuery } from "./ui";
+import { api, patch, download, date, time, money } from "@/lib/api";
+import {
+  diffLines,
+  diffStat,
+  withContext,
+  type DiffRow,
+} from "@/lib/line-diff";
+import type { Article, RecordEvent, SessionDetail } from "@/lib/types";
+import {
+  Badge,
+  Empty,
+  Modal,
+  PageHead,
+  articleStatusLabel,
+  useMediaQuery,
+} from "./ui";
 export const eventName = (event: RecordEvent) =>
   event.type === "run"
     ? "터미널 실행"
@@ -46,20 +60,11 @@ const runStatuses: Record<string, string> = {
   runtime_error: "런타임 에러",
   unknown: "판단 불가",
 };
+// Color is reserved for what needs attention: errors. A normal exit is not
+// a correct answer, so it stays neutral.
+const runTone = (status: string) => (status.includes("error") ? "red" : "neutral");
 function RunStatus({ status }: { status: string }) {
-  return (
-    <Badge
-      tone={
-        status === "success" || status === "normal_exit"
-          ? "green"
-          : status.includes("error")
-            ? "red"
-            : "neutral"
-      }
-    >
-      {runStatuses[status] || status}
-    </Badge>
-  );
+  return <Badge tone={runTone(status)}>{runStatuses[status] || status}</Badge>;
 }
 const eventIcon = (event: RecordEvent) =>
   event.type === "run"
@@ -73,40 +78,74 @@ const eventIcon = (event: RecordEvent) =>
         : event.type === "snapshot"
           ? FileCode2
           : ShieldCheck;
+const sameFile = (a: RecordEvent, b: RecordEvent) =>
+  (a.fileId || a.filePath) === (b.fileId || b.filePath);
 const lineCount = (value: unknown) =>
   safe(value).replace(/\n$/, "").split("\n").length;
-function diffStat(data: Record<string, unknown>) {
-  if (typeof data.diff === "string" && data.diff) {
-    const lines = data.diff.split("\n");
-    return {
-      added: lines.filter((l) => l.startsWith("+") && !l.startsWith("+++"))
-        .length,
-      removed: lines.filter((l) => l.startsWith("-") && !l.startsWith("---"))
-        .length,
-    };
-  }
-  const before = safe(data.before).split("\n"),
-    after = safe(data.after).split("\n");
-  const remaining = new Map<string, number>();
-  for (const line of before) remaining.set(line, (remaining.get(line) || 0) + 1);
-  let added = 0;
-  for (const line of after) {
-    const count = remaining.get(line) || 0;
-    if (count) remaining.set(line, count - 1);
-    else added++;
-  }
-  return {
-    added,
-    removed: [...remaining.values()].reduce((sum, n) => sum + n, 0),
-  };
+const firstLine = (value: unknown) => safe(value).trim().split("\n")[0];
+function previous(event: RecordEvent, events: RecordEvent[]) {
+  const index = events.indexOf(event);
+  for (let i = index - 1; i >= 0; i--)
+    if (events[i].type === event.type && sameFile(events[i], event))
+      return events[i];
+  return undefined;
 }
-function EventSummary({ event }: { event: RecordEvent }) {
+function codeChange(event: RecordEvent, events: RecordEvent[]) {
+  const data = event.data;
+  if (event.type === "edit" && (data.before != null || data.after != null))
+    return diffLines(safe(data.before), safe(data.after));
+  if (event.type === "snapshot") {
+    const before = previous(event, events);
+    if (before) return diffLines(safe(before.data.content), safe(data.content));
+  }
+  return undefined;
+}
+type Insight = { rows?: DiffRow[]; resultChanged?: boolean };
+function useInsights(events: RecordEvent[]) {
+  return useMemo(() => {
+    const map = new Map<string, Insight>();
+    for (const event of events) {
+      if (event.type === "edit" || event.type === "snapshot")
+        map.set(event.id, { rows: codeChange(event, events) });
+      if (event.type === "run") {
+        const before = previous(event, events);
+        map.set(event.id, {
+          resultChanged:
+            !!before &&
+            (before.data.status !== event.data.status ||
+              safe(before.data.output).trim() !==
+                safe(event.data.output).trim()),
+        });
+      }
+    }
+    return map;
+  }, [events]);
+}
+function DiffStat({ rows }: { rows: DiffRow[] }) {
+  const stat = diffStat(rows);
+  return (
+    <span className="diffstat">
+      <ins>+{stat.added}</ins>
+      <del>−{stat.removed}</del>
+    </span>
+  );
+}
+function EventSummary({
+  event,
+  insight,
+}: {
+  event: RecordEvent;
+  insight?: Insight;
+}) {
   const data = event.data;
   if (event.type === "run")
     return (
       <>
         <RunStatus status={String(data.status || "unknown")} />
-        <code>{safe(data.command)}</code>
+        {insight?.resultChanged && <Badge tone="amber">결과 변화</Badge>}
+        <code title={safe(data.command)}>
+          {firstLine(data.output) || "출력 없음"}
+        </code>
         {data.durationMs != null && (
           <span className="event-aside">
             {Number(data.durationMs).toLocaleString()}ms
@@ -115,20 +154,73 @@ function EventSummary({ event }: { event: RecordEvent }) {
       </>
     );
   if (event.type === "memo")
-    return <span className="event-quote">{safe(data.text).split("\n")[0]}</span>;
-  if (event.type === "edit") {
-    const stat = diffStat(data);
+    return <span className="event-quote">{firstLine(data.text)}</span>;
+  if (event.type === "edit")
     return (
-      <span className="diffstat">
-        <ins>+{stat.added}</ins>
-        <del>−{stat.removed}</del>
+      <>
+        {insight?.rows ? (
+          <DiffStat rows={insight.rows} />
+        ) : (
+          <span className="event-aside">변경 내용 기록</span>
+        )}
         {data.source === "unknown" && <Badge>출처 미확인</Badge>}
-      </span>
+      </>
     );
-  }
   if (event.type === "snapshot")
-    return <span className="event-aside">{lineCount(data.content)}줄</span>;
+    return insight?.rows ? (
+      <DiffStat rows={insight.rows} />
+    ) : (
+      <span className="event-aside">첫 저장 · {lineCount(data.content)}줄</span>
+    );
   return null;
+}
+function CodeDiff({ rows }: { rows: DiffRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const pieces = expanded ? rows : withContext(rows, 3);
+  if (!pieces.length) return <p className="detail-note">코드 변경 없음</p>;
+  return (
+    <div className="code-diff">
+      <table>
+        <tbody>
+          {pieces.map((piece, index) =>
+            piece.type === "gap" ? (
+              <tr key={index} className="gap">
+                <td colSpan={3}>
+                  <button onClick={() => setExpanded(true)}>
+                    변경 없는 {piece.hidden}줄 펼치기
+                  </button>
+                </td>
+              </tr>
+            ) : (
+              <tr key={index} className={piece.type}>
+                <td className="ln">{piece.oldNo ?? ""}</td>
+                <td className="ln">{piece.newNo ?? ""}</td>
+                <td className="src">
+                  <span
+                    className="sign"
+                    aria-label={
+                      piece.type === "add"
+                        ? "추가"
+                        : piece.type === "del"
+                          ? "삭제"
+                          : undefined
+                    }
+                  >
+                    {piece.type === "add"
+                      ? "+"
+                      : piece.type === "del"
+                        ? "−"
+                        : " "}
+                  </span>
+                  {piece.text || " "}
+                </td>
+              </tr>
+            ),
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 export function EventDetail({
   event,
@@ -138,6 +230,7 @@ export function EventDetail({
   events?: RecordEvent[];
 }) {
   const data = event.data;
+  const rows = useMemo(() => codeChange(event, events), [event, events]);
   if (event.type === "run") {
     const snapshot = events.find((e) => e.id === data.snapshotId);
     return (
@@ -167,20 +260,60 @@ export function EventDetail({
       </div>
     );
   }
-  if (event.type === "snapshot")
-    return <pre className="code">{safe(data.content)}</pre>;
+  if (event.type === "snapshot") {
+    const before = rows && previous(event, events);
+    return (
+      <div className="event-detail">
+        {rows && before ? (
+          <>
+            <p className="detail-note first">
+              이전 저장({time(before.occurredAt)}) 이후 바뀐 부분
+            </p>
+            <CodeDiff rows={rows} />
+            <details>
+              <summary>이 시점의 전체 코드</summary>
+              <pre className="code">{safe(data.content)}</pre>
+            </details>
+          </>
+        ) : (
+          <>
+            <p className="detail-note first">이 파일의 첫 저장입니다.</p>
+            <pre className="code">{safe(data.content)}</pre>
+          </>
+        )}
+      </div>
+    );
+  }
   if (event.type === "edit")
     return (
-      <div className="diff">
-        <div className="diff-heading">
-          <span>수정 전</span>
-          <span>수정 후</span>
-        </div>
-        <div className="diff-columns">
-          <pre>{safe(data.before) || "이전 코드 없음"}</pre>
-          <pre>{safe(data.after) || safe(data.diff)}</pre>
-        </div>
-        {data.source === "unknown" && <Badge>출처 미확인</Badge>}
+      <div className="event-detail">
+        {rows ? (
+          <CodeDiff rows={rows} />
+        ) : (
+          <pre className="code raw-diff">
+            {safe(data.diff)
+              .split("\n")
+              .map((line, i) => (
+                <span
+                  key={i}
+                  className={
+                    line.startsWith("+")
+                      ? "add"
+                      : line.startsWith("-")
+                        ? "del"
+                        : undefined
+                  }
+                >
+                  {line + "\n"}
+                </span>
+              ))}
+          </pre>
+        )}
+        {data.source === "unknown" && (
+          <p className="detail-note">
+            <Badge>출처 미확인</Badge> 편집기 밖에서 바뀐 내용일 수 있습니다.
+          </p>
+        )}
       </div>
     );
   if (event.type === "memo")
@@ -235,13 +368,22 @@ function SummaryText({
     </>
   );
 }
+export interface Usage {
+  day: number;
+  dayLimit: number;
+  month: number;
+  monthLimit: number;
+}
 export default function Timeline({
   detail,
   title,
   backLabel,
   initialFile = "",
+  articles,
+  usage,
   onBack,
   onGenerate,
+  onOpenArticle,
   onDelete,
   onRefresh,
   notify,
@@ -250,8 +392,11 @@ export default function Timeline({
   title: string;
   backLabel: string;
   initialFile?: string;
+  articles: Article[];
+  usage: Usage;
   onBack: () => void;
   onGenerate: (fileId?: string) => void;
+  onOpenArticle: (id: string) => void;
   onDelete: () => void;
   onRefresh: () => void;
   notify: (message: string, error?: boolean) => void;
@@ -260,7 +405,7 @@ export default function Timeline({
       detail.files.some((f) => f.id === initialFile) ? initialFile : "all",
     ),
     [selected, setSelected] = useState(""),
-    [chooseFile, setChooseFile] = useState(false),
+    [preparing, setPreparing] = useState(false),
     [problemOpen, setProblemOpen] = useState(false),
     [allSummaries, setAllSummaries] = useState(false),
     [statements, setStatements] = useState<Record<string, string>>(() =>
@@ -270,6 +415,7 @@ export default function Timeline({
     );
   const wide = useMediaQuery("(min-width: 1000px)");
   const events = detail.events || [];
+  const insights = useInsights(events);
   const files = useMemo(
     () =>
       Array.from(
@@ -293,6 +439,7 @@ export default function Timeline({
   const visible = events.filter(
     (e) => file === "all" || e.fileId === file || e.filePath === file,
   );
+  const runs = visible.filter((e) => e.type === "run");
   const current =
     visible.find((e) => e.id === selected) || (wide ? visible[0] : undefined);
   const sourceFile =
@@ -303,13 +450,10 @@ export default function Timeline({
     runs: events.filter((e) => e.type === "run").length,
     memos: events.filter((e) => e.type === "memo").length,
   };
-  const generate = () => {
-    if (file !== "all") onGenerate(file);
-    else if (files.length === 1) onGenerate(files[0].id);
-    else if (files.length > 1) setChooseFile(true);
-    else onGenerate();
-  };
-  function cite(id: string) {
+  const written = [...articles].sort((a, b) =>
+    b.updatedAt.localeCompare(a.updatedAt),
+  );
+  function select(id: string) {
     const target = events.find((e) => e.id === id);
     if (!target) return;
     if (!visible.includes(target)) setFile("all");
@@ -397,7 +541,10 @@ export default function Timeline({
                 기록 중지
               </button>
             )}
-            <button className="button primary" onClick={generate}>
+            <button
+              className="button primary"
+              onClick={() => setPreparing(true)}
+            >
               <Sparkles size={15} />
               초안 만들기
             </button>
@@ -428,6 +575,16 @@ export default function Timeline({
             <MessageSquare size={14} />
             메모 {counts.memos}
           </span>
+          {!!written.length && (
+            <button
+              className="meta-link"
+              onClick={() => onOpenArticle(written[0].id)}
+              title={written[0].title}
+            >
+              <FileText size={14} />
+              작성한 글 {written.length}편 · 이어서 편집
+            </button>
+          )}
         </div>
       </PageHead>
       {!!detail.gaps?.length && (
@@ -445,7 +602,7 @@ export default function Timeline({
                 <SummaryText
                   text={s.summary || s.text || "요약 준비 중"}
                   events={events}
-                  onCite={cite}
+                  onCite={select}
                 />
               </p>
             ))}
@@ -490,7 +647,7 @@ export default function Timeline({
             <NotebookPen size={14} />
             문제와 제약
             <span className={statements[sourceFile.id] ? "dot on" : "dot"}>
-              {statements[sourceFile.id] ? "입력됨" : "선택"}
+              {statements[sourceFile.id] ? "입력됨" : "미입력"}
             </span>
             <ChevronDown size={14} />
           </button>
@@ -507,7 +664,28 @@ export default function Timeline({
           notify={notify}
         />
       )}
-      {!counts.runs && (
+      {runs.length ? (
+        <div className="run-flow">
+          <span>실행 흐름</span>
+          <ol>
+            {runs.map((run, index) => {
+              const status = String(run.data.status || "unknown");
+              return (
+                <li key={run.id}>
+                  <button
+                    className={`run-dot ${runTone(status)} ${insights.get(run.id)?.resultChanged ? "changed" : ""} ${current?.id === run.id ? "on" : ""}`}
+                    onClick={() => select(run.id)}
+                    aria-label={`실행 ${index + 1}: ${runStatuses[status] || status}${insights.get(run.id)?.resultChanged ? ", 결과 변화" : ""}, ${time(run.occurredAt)}`}
+                    title={`${runStatuses[status] || status} · ${firstLine(run.data.output) || "출력 없음"}`}
+                  >
+                    {index + 1}
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : (
         <p className="inline-hint">
           실행 정보 없음 · VS Code 통합 터미널에서 실행하면 기록에 연결됩니다.
         </p>
@@ -518,8 +696,15 @@ export default function Timeline({
             {visible.map((event, index) => {
               const Icon = eventIcon(event);
               const active = current?.id === event.id;
+              const tone =
+                event.type === "run"
+                  ? runTone(String(event.data.status || "unknown"))
+                  : "";
               return (
-                <li key={event.id} className={`event-item ${event.type}`}>
+                <li
+                  key={event.id}
+                  className={`event-item ${event.type} ${tone}`}
+                >
                   <button
                     id={`event-${event.id}`}
                     className={`event-row ${active ? "selected" : ""}`}
@@ -546,7 +731,10 @@ export default function Timeline({
                     </span>
                     <span className="event-name">{eventName(event)}</span>
                     <span className="event-summary">
-                      <EventSummary event={event} />
+                      <EventSummary
+                        event={event}
+                        insight={insights.get(event.id)}
+                      />
                     </span>
                     {file === "all" && files.length > 1 && event.filePath && (
                       <span className="event-file">
@@ -572,27 +760,184 @@ export default function Timeline({
           확장에서 기록을 시작하고 파일을 저장해 보세요.
         </Empty>
       )}
-      {chooseFile && (
-        <Modal title="글로 만들 파일 선택" onClose={() => setChooseFile(false)}>
-          <p className="muted">한 파일의 풀이를 한 편의 글로 만듭니다.</p>
-          <div className="choice-list">
-            {files.map((f) => (
-              <button
-                key={f.id}
-                className="button subtle"
-                onClick={() => {
-                  setChooseFile(false);
-                  onGenerate(f.id);
-                }}
-              >
-                <FileCode2 size={16} />
-                {f.path}
-              </button>
-            ))}
-          </div>
-        </Modal>
+      {preparing && (
+        <DraftSheet
+          files={files}
+          events={events}
+          knownFiles={detail.files.map((f) => f.id)}
+          initialFile={file !== "all" ? file : files[0]?.id || ""}
+          statements={statements}
+          articles={written}
+          usage={usage}
+          onStatementSaved={(id, value) =>
+            setStatements((prev) => ({ ...prev, [id]: value }))
+          }
+          onConfirm={onGenerate}
+          onOpenArticle={onOpenArticle}
+          onClose={() => setPreparing(false)}
+          notify={notify}
+        />
       )}
     </section>
+  );
+}
+function DraftSheet({
+  files,
+  events,
+  knownFiles,
+  initialFile,
+  statements,
+  articles,
+  usage,
+  onStatementSaved,
+  onConfirm,
+  onOpenArticle,
+  onClose,
+  notify,
+}: {
+  files: Array<{ id: string; path: string }>;
+  events: RecordEvent[];
+  knownFiles: string[];
+  initialFile: string;
+  statements: Record<string, string>;
+  articles: Article[];
+  usage: Usage;
+  onStatementSaved: (id: string, value: string) => void;
+  onConfirm: (fileId?: string) => void;
+  onOpenArticle: (id: string) => void;
+  onClose: () => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [target, setTarget] = useState(initialFile),
+    [problem, setProblem] = useState(statements[initialFile] || ""),
+    [busy, setBusy] = useState(false);
+  // Mirrors the API: a file draft receives that file's events only.
+  const scoped = events.filter(
+    (e) => !target || e.fileId === target || e.filePath === target,
+  );
+  const count = (type: string) => scoped.filter((e) => e.type === type).length;
+  const changes = count("edit") + count("snapshot"),
+    memos = count("memo"),
+    runs = count("run");
+  const size = new Blob([JSON.stringify(scoped.map((e) => e.data))]).size;
+  const existing = articles.filter((a) => !target || a.fileId === target);
+  const editable = knownFiles.includes(target);
+  const blocked =
+    usage.month >= usage.monthLimit
+      ? "이번 달 AI 한도에 도달했습니다."
+      : usage.day >= usage.dayLimit
+        ? "오늘의 AI 한도에 도달했습니다."
+        : "";
+  async function start() {
+    setBusy(true);
+    try {
+      if (editable && problem !== (statements[target] || "")) {
+        await patch(`/files/${target}`, { problemStatement: problem });
+        onStatementSaved(target, problem);
+      }
+      onConfirm(target || undefined);
+      onClose();
+    } catch (e) {
+      notify(String(e), true);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="초안 만들기" onClose={onClose}>
+      <div className="draft-sheet">
+        {files.length > 1 && (
+          <fieldset className="file-choice">
+            <legend>글로 만들 파일</legend>
+            {files.map((f) => (
+              <label key={f.id}>
+                <input
+                  type="radio"
+                  name="draft-file"
+                  checked={target === f.id}
+                  onChange={() => {
+                    setTarget(f.id);
+                    setProblem(statements[f.id] || "");
+                  }}
+                />
+                <span className="mono">{f.path}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <section className="sheet-block">
+          <h3>AI에 보낼 기록</h3>
+          <p>
+            사건 {scoped.length}개 · 코드 변경 {changes} · 실행 {runs} · 메모{" "}
+            {memos} · 약 {size < 1024 ? `${size}B` : `${(size / 1024).toFixed(1)}KB`}
+          </p>
+          <p className="field-hint">
+            {files.length > 1 || target
+              ? "선택한 파일의 기록 전체를 시간순으로 보냅니다."
+              : "이 세션의 기록 전체를 시간순으로 보냅니다."}{" "}
+            원본 기록은 바뀌지 않습니다.
+          </p>
+        </section>
+        {editable && (
+          <label className="sheet-block">
+            문제와 제약 <span className="field-hint">선택 사항</span>
+            <textarea
+              value={problem}
+              onChange={(e) => setProblem(e.target.value)}
+              rows={3}
+              placeholder="문제 설명, 입력 범위, 시간·메모리 제한"
+            />
+            <span className="field-hint below">
+              비워 두면 글의 문제 조건은 ‘확인 필요’로 남습니다. 문제 번호로
+              조건을 추정하지 않습니다.
+            </span>
+          </label>
+        )}
+        {(!memos || !runs) && (
+          <div className="notice warning">
+            {!memos &&
+              "메모가 없으면 당시의 판단을 1인칭으로 쓰지 않습니다. VS Code에서 메모를 남기면 글에 반영됩니다. "}
+            {!runs && "실행 기록이 없어 결과는 서술하지 않습니다."}
+          </div>
+        )}
+        {!!existing.length && (
+          <div className="notice">
+            <span>
+              이 파일로 만든 글이 {existing.length}편 있습니다(최근:{" "}
+              {existing[0].title || "제목 없는 글"},{" "}
+              {articleStatusLabel(existing[0].status)}). 새 초안은 별도 글로
+              저장됩니다.
+            </span>
+            <button
+              onClick={() => {
+                onClose();
+                onOpenArticle(existing[0].id);
+              }}
+            >
+              기존 글 열기
+            </button>
+          </div>
+        )}
+        <footer className="sheet-footer">
+          <span className={blocked ? "danger" : ""}>
+            {blocked ||
+              `이번 달 AI 사용 ${money(usage.month)} / $${usage.monthLimit}`}
+          </span>
+          <div className="actions">
+            <button className="button subtle" onClick={onClose}>
+              취소
+            </button>
+            <button
+              className="button primary"
+              disabled={busy || !!blocked}
+              onClick={start}
+            >
+              <Sparkles size={15} />
+              초안 생성 시작
+            </button>
+          </div>
+        </footer>
+      </div>
+    </Modal>
   );
 }
 function ProblemStatement({
