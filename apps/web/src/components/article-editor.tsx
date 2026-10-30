@@ -109,6 +109,7 @@ export default function ArticleEditor({
     lastSaved = useRef(""),
     saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     saveRef = useRef<() => Promise<boolean>>(async () => false),
+    inflightSave = useRef<Promise<boolean> | null>(null),
     fileRef = useRef<HTMLInputElement>(null);
   articleRef.current = article;
   blocksRef.current = blocks;
@@ -306,12 +307,19 @@ export default function ArticleEditor({
         }));
     }
   }, [initial, editor]);
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<boolean> => {
     if (!editor || conflict) return false;
-    if (savingRef.current) return false;
+    // An explicit action (preview, export, publish) during autosave waits for
+    // that request and then saves anything typed meanwhile.
+    if (savingRef.current) {
+      await inflightSave.current;
+      return saveRef.current();
+    }
     if (!dirtyRef.current) return true;
     savingRef.current = true;
     setSaving(true);
+    let settle: (value: boolean) => void = () => {};
+    inflightSave.current = new Promise((resolve) => (settle = resolve));
     const document = editor.getJSON();
     const snapshot = JSON.stringify({
       document,
@@ -344,13 +352,16 @@ export default function ArticleEditor({
         setDirty(false);
         setBlocks(result.blocks);
       }
+      settle(current === snapshot);
       return current === snapshot;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) setConflict(true);
       setSaveError(errorMessage(error));
+      settle(false);
       return false;
     } finally {
       savingRef.current = false;
+      inflightSave.current = null;
       setSaving(false);
       if (dirtyRef.current && !conflict)
         saveTimer.current = setTimeout(() => void saveRef.current(), 2500);
