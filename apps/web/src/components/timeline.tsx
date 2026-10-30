@@ -62,7 +62,8 @@ const runStatuses: Record<string, string> = {
 };
 // Color is reserved for what needs attention: errors. A normal exit is not
 // a correct answer, so it stays neutral.
-const runTone = (status: string) => (status.includes("error") ? "red" : "neutral");
+const runTone = (status: string) =>
+  status.includes("error") ? "red" : "neutral";
 function RunStatus({ status }: { status: string }) {
   return <Badge tone={runTone(status)}>{runStatuses[status] || status}</Badge>;
 }
@@ -176,17 +177,49 @@ function EventSummary({
 }
 function CodeDiff({ rows }: { rows: DiffRow[] }) {
   const [expanded, setExpanded] = useState(false);
+  const [page, setPage] = useState(0);
   const pieces = expanded ? rows : withContext(rows, 3);
+  const pageSize = 500;
+  const lastPage = Math.max(0, Math.ceil(pieces.length / pageSize) - 1);
+  const currentPage = Math.min(page, lastPage);
+  const visible = pieces.slice(
+    currentPage * pageSize,
+    (currentPage + 1) * pageSize,
+  );
   if (!pieces.length) return <p className="detail-note">코드 변경 없음</p>;
   return (
     <div className="code-diff">
+      {lastPage > 0 && (
+        <nav aria-label="코드 비교 페이지" className="row between">
+          <button
+            disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            이전 코드 비교
+          </button>
+          <span>
+            {currentPage + 1} / {lastPage + 1} · 최대 {pageSize}줄씩 표시
+          </span>
+          <button
+            disabled={currentPage === lastPage}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            다음 코드 비교
+          </button>
+        </nav>
+      )}
       <table>
         <tbody>
-          {pieces.map((piece, index) =>
+          {visible.map((piece, index) =>
             piece.type === "gap" ? (
               <tr key={index} className="gap">
                 <td colSpan={3}>
-                  <button onClick={() => setExpanded(true)}>
+                  <button
+                    onClick={() => {
+                      setExpanded(true);
+                      setPage(0);
+                    }}
+                  >
                     변경 없는 {piece.hidden}줄 펼치기
                   </button>
                 </td>
@@ -242,7 +275,9 @@ export function EventDetail({
         </div>
         <pre className="command">$ {safe(data.command)}</pre>
         <pre className="code output">{safe(data.output) || "출력 없음"}</pre>
-        <p className="detail-note">정상 종료는 정답 여부를 의미하지 않습니다.</p>
+        <p className="detail-note">
+          정상 종료는 정답 여부를 의미하지 않습니다.
+        </p>
         {data.inputSnapshot != null && (
           <details>
             <summary>리다이렉션 입력</summary>
@@ -269,7 +304,7 @@ export function EventDetail({
             <p className="detail-note first">
               이전 저장({time(before.occurredAt)}) 이후 바뀐 부분
             </p>
-            <CodeDiff rows={rows} />
+            <CodeDiff key={event.id} rows={rows} />
             <details>
               <summary>이 시점의 전체 코드</summary>
               <pre className="code">{safe(data.content)}</pre>
@@ -288,7 +323,7 @@ export function EventDetail({
     return (
       <div className="event-detail">
         {rows ? (
-          <CodeDiff rows={rows} />
+          <CodeDiff key={event.id} rows={rows} />
         ) : (
           <pre className="code raw-diff">
             {safe(data.diff)
@@ -708,13 +743,13 @@ export default function Timeline({
                   <button
                     id={`event-${event.id}`}
                     className={`event-row ${active ? "selected" : ""}`}
-                    onClick={() =>
-                      setSelected(!wide && active ? "" : event.id)
-                    }
+                    onClick={() => setSelected(!wide && active ? "" : event.id)}
                     onKeyDown={(e) => onRowKey(e, index)}
                     {...(wide
                       ? {
-                          "aria-current": active ? ("true" as const) : undefined,
+                          "aria-current": active
+                            ? ("true" as const)
+                            : undefined,
                           "aria-controls": "event-pane",
                         }
                       : { "aria-expanded": active })}
@@ -868,7 +903,8 @@ function DraftSheet({
           <h3>AI에 보낼 기록</h3>
           <p>
             사건 {scoped.length}개 · 코드 변경 {changes} · 실행 {runs} · 메모{" "}
-            {memos} · 약 {size < 1024 ? `${size}B` : `${(size / 1024).toFixed(1)}KB`}
+            {memos} · 약{" "}
+            {size < 1024 ? `${size}B` : `${(size / 1024).toFixed(1)}KB`}
           </p>
           <p className="field-hint">
             {files.length > 1 || target
@@ -975,8 +1011,8 @@ function ProblemStatement({
       />
       <div className="problem-footer">
         <p>
-          문제 지문은 자동 수집하지 않습니다. 입력하지 않은 조건은 AI가
-          추정하지 않습니다.
+          문제 지문은 자동 수집하지 않습니다. 입력하지 않은 조건은 AI가 추정하지
+          않습니다.
         </p>
         <button
           className="button secondary"

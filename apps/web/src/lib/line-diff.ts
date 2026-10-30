@@ -9,7 +9,9 @@ export type DiffPiece = DiffRow | { type: "gap"; hidden: number };
 // shown as a block replacement. Algorithm solutions stay far below it.
 const MAX_CELLS = 4_000_000;
 const lines = (value: string) =>
-  value === "" ? [] : value.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+  value === ""
+    ? []
+    : value.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
 export function diffLines(before: string, after: string): DiffRow[] {
   const a = lines(before),
     b = lines(after);
@@ -25,7 +27,8 @@ export function diffLines(before: string, after: string): DiffRow[] {
     midB = b.slice(start, endB);
   const ops: DiffRow["type"][] = [];
   if (midA.length * midB.length > MAX_CELLS) {
-    ops.push(...midA.map(() => "del" as const), ...midB.map(() => "add" as const));
+    for (let i = 0; i < midA.length; i++) ops.push("del");
+    for (let i = 0; i < midB.length; i++) ops.push("add");
   } else {
     const n = midA.length,
       m = midB.length,

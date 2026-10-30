@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { diffLines, diffStat, withContext } from "./line-diff";
 describe("line diff", () => {
+  it("handles many short lines within the snapshot size limit without argument overflow", () => {
+    const rows = diffLines("a\n".repeat(150000), "b\n".repeat(150000));
+    expect(diffStat(rows)).toEqual({ added: 150000, removed: 150000 });
+    expect(rows[149999]).toMatchObject({ type: "del", oldNo: 150000 });
+    expect(rows[150000]).toMatchObject({ type: "add", newNo: 1 });
+  });
   it("marks only the changed line and keeps line numbers on both sides", () => {
     const rows = diffLines(
       "#include <iostream>\nint main(){ return a-b; }\n",
@@ -15,12 +21,21 @@ describe("line diff", () => {
   });
   it("aligns insertions in the middle instead of rewriting the tail", () => {
     const rows = diffLines("a\nb\nc\nd", "a\nb\nx\nc\nd");
-    expect(rows.map((r) => r.type)).toEqual(["same", "same", "add", "same", "same"]);
+    expect(rows.map((r) => r.type)).toEqual([
+      "same",
+      "same",
+      "add",
+      "same",
+      "same",
+    ]);
     expect(rows[3]).toEqual({ type: "same", text: "c", oldNo: 3, newNo: 4 });
   });
   it("treats a first save as all additions and an identical save as no change", () => {
     expect(diffStat(diffLines("", "x\ny\n"))).toEqual({ added: 2, removed: 0 });
-    expect(diffStat(diffLines("x\r\ny\n", "x\ny"))).toEqual({ added: 0, removed: 0 });
+    expect(diffStat(diffLines("x\r\ny\n", "x\ny"))).toEqual({
+      added: 0,
+      removed: 0,
+    });
   });
   it("folds unchanged lines outside the context window", () => {
     const before = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
